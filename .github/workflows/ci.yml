@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ufbt
+        run: |
+          python -m pip install --upgrade pip
+          pip install ufbt
+
+      - name: Run lint checks
+        run: ufbt lint
+
+  build:
+    name: Build application
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ufbt
+        run: |
+          python -m pip install --upgrade pip
+          pip install ufbt
+
+      - name: Build i2c tools application
+        run: ufbt build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: i2ctools-build
+          path: |
+            build/**/*.fap
+            dist/**/*.fap
+          if-no-files-found: warn
