@@ -1,5 +1,19 @@
 #include "i2ctools_i.h"
 
+#include <dialogs/dialogs.h>
+#include <stdio.h>
+
+static void i2ctools_show_dialog_message(const char* text) {
+    DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
+    DialogMessage* message = dialog_message_alloc();
+    dialog_message_set_header(message, "I2C Tools", 64, 4, AlignCenter, AlignTop);
+    dialog_message_set_text(message, text, 64, 32, AlignCenter, AlignCenter);
+    dialog_message_set_buttons(message, NULL, "OK", NULL);
+    dialog_message_show(dialogs, message);
+    dialog_message_free(message);
+    furi_record_close(RECORD_DIALOGS);
+}
+
 void i2ctools_draw_callback(Canvas* canvas, void* ctx) {
     i2cTools* i2ctools = ctx;
     if(furi_mutex_acquire(i2ctools->mutex, 200) != FuriStatusOk) {
@@ -17,6 +31,10 @@ void i2ctools_draw_callback(Canvas* canvas, void* ctx) {
 
     case SNIFF_VIEW:
         draw_sniffer_view(canvas, i2ctools->sniffer);
+        break;
+
+    case CONFIG_VIEW:
+        draw_config_view(canvas, i2ctools->sniffer);
         break;
 
     case SEND_VIEW:
@@ -77,6 +95,7 @@ int32_t i2ctools_app(void* p) {
             } else {
                 if(i2ctools->main_view->current_view == SNIFF_VIEW) {
                     stop_interrupts();
+                    i2c_sniffer_stop_logging(i2ctools->sniffer);
                     i2ctools->sniffer->started = false;
                     i2ctools->sniffer->state = I2C_BUS_FREE;
                 }
@@ -176,12 +195,32 @@ int32_t i2ctools_app(void* p) {
             } else if(i2ctools->main_view->current_view == SNIFF_VIEW) {
                 if(i2ctools->sniffer->started) {
                     stop_interrupts();
+                    i2c_sniffer_stop_logging(i2ctools->sniffer);
                     i2ctools->sniffer->started = false;
                     i2ctools->sniffer->state = I2C_BUS_FREE;
                 } else {
+                    if(!i2c_sniffer_start_logging(i2ctools->sniffer)) {
+                        i2ctools_show_dialog_message("Storage unavailable");
+                    }
+                    clear_sniffer_buffers(i2ctools->sniffer);
                     start_interrupts(i2ctools->sniffer);
                     i2ctools->sniffer->started = true;
                     i2ctools->sniffer->state = I2C_BUS_FREE;
+                }
+            }
+        } else if(event.key == InputKeyOk && event.type == InputTypeLong) {
+            if(i2ctools->main_view->current_view == SNIFF_VIEW) {
+                if(i2ctools->sniffer->started) {
+                    i2ctools_show_dialog_message("Stop logging first");
+                } else {
+                    i2c_sniffer_cycle_log_format(i2ctools->sniffer);
+                    char message[32];
+                    snprintf(
+                        message,
+                        sizeof(message),
+                        "Log format: %s",
+                        i2c_sniffer_log_format_name(i2ctools->sniffer->log_format));
+                    i2ctools_show_dialog_message(message);
                 }
             }
         } else if(event.key == InputKeyRight && event.type == InputTypeRelease) {
@@ -195,6 +234,8 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sniffer->menu_index++;
                     i2ctools->sniffer->row_index = 0;
                 }
+            } else if(i2ctools->main_view->current_view == CONFIG_VIEW) {
+                i2c_sniffer_cycle_log_format(i2ctools->sniffer);
             }
         } else if(event.key == InputKeyLeft && event.type == InputTypeRelease) {
             if(i2ctools->main_view->current_view == SEND_VIEW) {
@@ -207,9 +248,20 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sniffer->menu_index--;
                     i2ctools->sniffer->row_index = 0;
                 }
+            } else if(i2ctools->main_view->current_view == CONFIG_VIEW) {
+                i2c_sniffer_cycle_log_format_reverse(i2ctools->sniffer);
             }
         }
         view_port_update(i2ctools->view_port);
+        if(i2ctools->sniffer->log_error_pending) {
+            const char* toast_message =
+                i2ctools->sniffer->log_error_message[0] != '\0'
+                    ? i2ctools->sniffer->log_error_message
+                    : "Log write failed";
+            i2ctools_show_dialog_message(toast_message);
+            i2ctools->sniffer->log_error_pending = false;
+            i2ctools->sniffer->log_error_message[0] = '\0';
+        }
     }
     gui_remove_view_port(gui, i2ctools->view_port);
     view_port_free(i2ctools->view_port);

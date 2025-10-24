@@ -3,6 +3,9 @@
 #include <furi.h>
 #include <furi_hal.h>
 
+typedef struct Storage Storage;
+typedef struct File File;
+
 // I2C Pins
 #define pinSCL &gpio_ext_pc0
 #define pinSDA &gpio_ext_pc1
@@ -18,12 +21,21 @@ typedef enum { I2C_BUS_FREE, I2C_BUS_STARTED } i2cBusStates;
 // Nb of records
 #define MAX_RECORDS 128
 
+#define I2C_SNIFFER_LOG_MESSAGE_SIZE 64
+
+typedef enum {
+    I2C_SNIFFER_LOG_FORMAT_CLASSIC = 0,
+    I2C_SNIFFER_LOG_FORMAT_PICO,
+    I2C_SNIFFER_LOG_FORMAT_COUNT,
+} i2cSnifferLogFormat;
+
 /// @brief Struct used to store our reads
 typedef struct {
     uint8_t data[MAX_MESSAGE_SIZE];
     bool ack[MAX_MESSAGE_SIZE];
     uint8_t bit_index;
     uint8_t data_index;
+    bool logged;
 } i2cFrame;
 
 typedef struct {
@@ -34,6 +46,12 @@ typedef struct {
     uint8_t frame_index;
     uint8_t menu_index;
     uint8_t row_index;
+    bool logging_enabled;
+    bool log_error_pending;
+    i2cSnifferLogFormat log_format;
+    char log_error_message[I2C_SNIFFER_LOG_MESSAGE_SIZE];
+    Storage* storage;
+    File* log_file;
 } i2cSniffer;
 
 void clear_sniffer_buffers(i2cSniffer* i2c_sniffer);
@@ -44,3 +62,10 @@ void SCLcallback(void* _i2c_sniffer);
 
 i2cSniffer* i2c_sniffer_alloc();
 void i2c_sniffer_free(i2cSniffer* i2c_sniffer);
+
+bool i2c_sniffer_start_logging(i2cSniffer* i2c_sniffer);
+void i2c_sniffer_stop_logging(i2cSniffer* i2c_sniffer);
+void i2c_sniffer_finalize_current_frame(i2cSniffer* i2c_sniffer);
+void i2c_sniffer_cycle_log_format(i2cSniffer* i2c_sniffer);
+void i2c_sniffer_cycle_log_format_reverse(i2cSniffer* i2c_sniffer);
+const char* i2c_sniffer_log_format_name(i2cSnifferLogFormat format);
