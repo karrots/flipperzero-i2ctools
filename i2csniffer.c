@@ -9,7 +9,76 @@
 #define I2C_TOOLS_LOG_FILE_TEMPLATE I2C_TOOLS_APP_DATA_DIR "/sniffer-%04u%02u%02u-%02u%02u%02u.log"
 #define I2C_TOOLS_LOG_FILE_FALLBACK_TEMPLATE I2C_TOOLS_APP_DATA_DIR "/sniffer-%08lu.log"
 #define I2C_TOOLS_LOG_FILE_PATH_MAX 64
+#define I2C_TOOLS_CONFIG_FILE_PATH I2C_TOOLS_APP_DATA_DIR "/config.bin"
 
+const char* i2c_sniffer_log_format_name(i2cSnifferLogFormat format) {
+    switch(format) {
+    case I2C_SNIFFER_LOG_FORMAT_PICO:
+        return "Pico";
+    case I2C_SNIFFER_LOG_FORMAT_CLASSIC:
+    default:
+        return "Classic";
+    }
+}
+
+static void i2c_sniffer_save_config(const i2cSniffer* i2c_sniffer) {
+    furi_assert(i2c_sniffer);
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    if(!storage) {
+        return;
+    }
+    storage_common_mkdir(storage, I2C_TOOLS_APP_DATA_DIR);
+    File* file = storage_file_alloc(storage);
+    if(file) {
+        if(storage_file_open(file, I2C_TOOLS_CONFIG_FILE_PATH, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
+            uint8_t value = (uint8_t)i2c_sniffer->log_format;
+            storage_file_write(file, &value, sizeof(value));
+            storage_file_close(file);
+        }
+        storage_file_free(file);
+    }
+    furi_record_close(RECORD_STORAGE);
+}
+
+void i2c_sniffer_cycle_log_format_reverse(i2cSniffer* i2c_sniffer) {
+    furi_assert(i2c_sniffer);
+    i2c_sniffer->log_format = (i2cSnifferLogFormat)(
+        (i2c_sniffer->log_format + I2C_SNIFFER_LOG_FORMAT_COUNT - 1) %
+        I2C_SNIFFER_LOG_FORMAT_COUNT);
+    i2c_sniffer_save_config(i2c_sniffer);
+}
+
+void i2c_sniffer_cycle_log_format(i2cSniffer* i2c_sniffer) {
+    furi_assert(i2c_sniffer);
+    i2c_sniffer->log_format =
+        (i2cSnifferLogFormat)((i2c_sniffer->log_format + 1) % I2C_SNIFFER_LOG_FORMAT_COUNT);
+    i2c_sniffer_save_config(i2c_sniffer);
+}
+
+static bool i2c_sniffer_format_classic(char* line, size_t line_size, const i2cFrame* frame);
+static bool i2c_sniffer_format_pico(char* line, size_t line_size, const i2cFrame* frame);
+
+static void i2c_sniffer_load_config(i2cSniffer* i2c_sniffer) {
+    furi_assert(i2c_sniffer);
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    if(!storage) {
+        return;
+    }
+    File* file = storage_file_alloc(storage);
+    if(file) {
+        if(storage_file_open(file, I2C_TOOLS_CONFIG_FILE_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) {
+            uint8_t value = 0;
+            if(storage_file_read(file, &value, sizeof(value)) == sizeof(value)) {
+                if(value < I2C_SNIFFER_LOG_FORMAT_COUNT) {
+                    i2c_sniffer->log_format = (i2cSnifferLogFormat)value;
+                }
+            }
+            storage_file_close(file);
+        }
+        storage_file_free(file);
+    }
+    furi_record_close(RECORD_STORAGE);
+}
 static void i2c_sniffer_build_log_path(char* buffer, size_t size) {
     if(!buffer || size == 0) {
         return;
@@ -105,69 +174,149 @@ static void i2c_sniffer_log_frame(i2cSniffer* i2c_sniffer, const i2cFrame* frame
     }
 
     char line[512];
-    size_t offset = 0;
-    uint8_t address_byte = frame->data[0];
-    uint8_t address = address_byte >> 1;
-    bool read = address_byte & 0x01;
-    int result = snprintf(line, sizeof(line), "ADDR=0x%02X %c", address, read ? 'R' : 'W');
-    if(result < 0) {
+    bool formatted = false;
+    switch(i2c_sniffer->log_format) {
+    case I2C_SNIFFER_LOG_FORMAT_PICO:
+        formatted = i2c_sniffer_format_pico(line, sizeof(line), frame);
+        break;
+    case I2C_SNIFFER_LOG_FORMAT_CLASSIC:
+    default:
+        formatted = i2c_sniffer_format_classic(line, sizeof(line), frame);
+        break;
+    }
+    if(!formatted) {
         return;
     }
-    offset = (size_t)result;
-    if(offset >= sizeof(line)) {
-        offset = sizeof(line) - 1;
+    i2c_sniffer_write_log(i2c_sniffer, line, strlen(line));
+}
+
+static bool i2c_sniffer_format_classic(char* line, size_t line_size, const i2cFrame* frame) {
+    if(!line || line_size == 0 || !frame) {
+        return false;
     }
+
+    size_t offset = 0;
+    int result = 0;
+    DateTime datetime = {0};
+    furi_hal_rtc_get_datetime(&datetime);
+    if(datetime.year >= 2000 && datetime.month >= 1 && datetime.day >= 1) {
+        result = snprintf(
+            line + offset,
+            line_size - offset,
+            "TIME=%04u-%02u-%02u %02u:%02u:%02u ",
+            (unsigned int)datetime.year,
+            (unsigned int)datetime.month,
+            (unsigned int)datetime.day,
+            (unsigned int)datetime.hour,
+            (unsigned int)datetime.minute,
+            (unsigned int)datetime.second);
+    } else {
+        result = snprintf(
+            line + offset,
+            line_size - offset,
+            "TIME-TICK=%08lu ",
+            (unsigned long)furi_get_tick());
+    }
+    if(result < 0 || (size_t)result >= line_size - offset) {
+        return false;
+    }
+    offset += (size_t)result;
+
+    uint8_t address_byte = frame->data[0];
+    uint8_t address = address_byte >> 1;
+    bool read = (address_byte & 0x01) != 0;
+    result = snprintf(
+        line + offset,
+        line_size - offset,
+        "ADDR=0x%02X %c",
+        address,
+        read ? 'R' : 'W');
+    if(result < 0 || (size_t)result >= line_size - offset) {
+        return false;
+    }
+    offset += (size_t)result;
 
     uint8_t data_start = 1;
     if(!read && frame->data_index > 1) {
-        result = snprintf(line + offset, sizeof(line) - offset, " CMD=0x%02X", frame->data[1]);
-        if(result < 0) {
-            return;
+        result = snprintf(
+            line + offset,
+            line_size - offset,
+            " CMD=0x%02X",
+            frame->data[1]);
+        if(result < 0 || (size_t)result >= line_size - offset) {
+            return false;
         }
         offset += (size_t)result;
-        if(offset >= sizeof(line)) {
-            offset = sizeof(line) - 1;
-        }
         data_start = 2;
     } else {
-        result = snprintf(line + offset, sizeof(line) - offset, " CMD=--");
-        if(result < 0) {
-            return;
+        result = snprintf(line + offset, line_size - offset, " CMD=--");
+        if(result < 0 || (size_t)result >= line_size - offset) {
+            return false;
         }
         offset += (size_t)result;
-        if(offset >= sizeof(line)) {
-            offset = sizeof(line) - 1;
-        }
     }
 
     if(frame->data_index > data_start) {
-        result = snprintf(line + offset, sizeof(line) - offset, " DATA=");
-        if(result < 0) {
-            return;
+        result = snprintf(line + offset, line_size - offset, " DATA=");
+        if(result < 0 || (size_t)result >= line_size - offset) {
+            return false;
         }
         offset += (size_t)result;
-        if(offset >= sizeof(line)) {
-            offset = sizeof(line) - 1;
-        }
         for(uint8_t idx = data_start; idx < frame->data_index; idx++) {
-            result = snprintf(line + offset, sizeof(line) - offset, "%s0x%02X", idx == data_start ? "" : " ", frame->data[idx]);
-            if(result < 0) {
-                return;
+            result = snprintf(
+                line + offset,
+                line_size - offset,
+                "%s0x%02X",
+                idx == data_start ? "" : " ",
+                frame->data[idx]);
+            if(result < 0 || (size_t)result >= line_size - offset) {
+                return false;
             }
             offset += (size_t)result;
-            if(offset >= sizeof(line)) {
-                offset = sizeof(line) - 1;
-                break;
-            }
         }
     }
 
-    if(offset < sizeof(line) - 1) {
-        line[offset++] = '\n';
+    if(line_size - offset < 2) {
+        return false;
     }
-    line[offset < sizeof(line) ? offset : sizeof(line) - 1] = '\0';
+    line[offset++] = '\n';
+    line[offset] = '\0';
 
-    i2c_sniffer_write_log(i2c_sniffer, line, strlen(line));
+    return true;
+}
+
+static bool i2c_sniffer_format_pico(char* line, size_t line_size, const i2cFrame* frame) {
+    if(!line || line_size == 0 || !frame) {
+        return false;
+    }
+
+    const char* hex = "0123456789ABCDEF";
+    size_t offset = 0;
+
+    if(line_size < 5) {
+        return false;
+    }
+    line[offset++] = 's';
+
+    for(uint8_t idx = 0; idx < frame->data_index; idx++) {
+        if(line_size - offset <= 4) {
+            return false;
+        }
+        uint8_t value = frame->data[idx];
+        line[offset++] = hex[value >> 4];
+        line[offset++] = hex[value & 0x0F];
+        line[offset++] = frame->ack[idx] ? 'a' : 'n';
+    }
+
+    if(line_size - offset < 4) {
+        return false;
+    }
+    line[offset++] = 'p';
+    line[offset++] = '\r';
+    line[offset++] = '\n';
+    line[offset] = '\0';
+
+    return true;
 }
 
 void clear_sniffer_buffers(i2cSniffer* i2c_sniffer) {
@@ -263,10 +412,12 @@ i2cSniffer* i2c_sniffer_alloc() {
     i2c_sniffer->menu_index = 0;
     i2c_sniffer->logging_enabled = false;
     i2c_sniffer->log_error_pending = false;
+    i2c_sniffer->log_format = I2C_SNIFFER_LOG_FORMAT_CLASSIC;
     i2c_sniffer->log_error_message[0] = '\0';
     i2c_sniffer->storage = NULL;
     i2c_sniffer->log_file = NULL;
     clear_sniffer_buffers(i2c_sniffer);
+    i2c_sniffer_load_config(i2c_sniffer);
     return i2c_sniffer;
 }
 

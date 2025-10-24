@@ -1,6 +1,7 @@
 #include "i2ctools_i.h"
 
 #include <dialogs/dialogs.h>
+#include <stdio.h>
 
 static void i2ctools_show_dialog_message(const char* text) {
     DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
@@ -30,6 +31,10 @@ void i2ctools_draw_callback(Canvas* canvas, void* ctx) {
 
     case SNIFF_VIEW:
         draw_sniffer_view(canvas, i2ctools->sniffer);
+        break;
+
+    case CONFIG_VIEW:
+        draw_config_view(canvas, i2ctools->sniffer);
         break;
 
     case SEND_VIEW:
@@ -203,6 +208,21 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sniffer->state = I2C_BUS_FREE;
                 }
             }
+        } else if(event.key == InputKeyOk && event.type == InputTypeLong) {
+            if(i2ctools->main_view->current_view == SNIFF_VIEW) {
+                if(i2ctools->sniffer->started) {
+                    i2ctools_show_dialog_message("Stop logging first");
+                } else {
+                    i2c_sniffer_cycle_log_format(i2ctools->sniffer);
+                    char message[32];
+                    snprintf(
+                        message,
+                        sizeof(message),
+                        "Log format: %s",
+                        i2c_sniffer_log_format_name(i2ctools->sniffer->log_format));
+                    i2ctools_show_dialog_message(message);
+                }
+            }
         } else if(event.key == InputKeyRight && event.type == InputTypeRelease) {
             if(i2ctools->main_view->current_view == SEND_VIEW) {
                 if(i2ctools->sender->address_idx < (i2ctools->scanner->nb_found - 1)) {
@@ -214,6 +234,8 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sniffer->menu_index++;
                     i2ctools->sniffer->row_index = 0;
                 }
+            } else if(i2ctools->main_view->current_view == CONFIG_VIEW) {
+                i2c_sniffer_cycle_log_format(i2ctools->sniffer);
             }
         } else if(event.key == InputKeyLeft && event.type == InputTypeRelease) {
             if(i2ctools->main_view->current_view == SEND_VIEW) {
@@ -226,6 +248,8 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sniffer->menu_index--;
                     i2ctools->sniffer->row_index = 0;
                 }
+            } else if(i2ctools->main_view->current_view == CONFIG_VIEW) {
+                i2c_sniffer_cycle_log_format_reverse(i2ctools->sniffer);
             }
         }
         view_port_update(i2ctools->view_port);

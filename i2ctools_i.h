@@ -11,6 +11,7 @@
 #include "views/scanner_view.h"
 #include "views/sender_view.h"
 #include "views/infos_view.h"
+#include "views/config_view.h"
 
 // App datas
 typedef struct {

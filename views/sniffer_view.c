@@ -20,7 +20,8 @@ void draw_sniffer_view(Canvas* canvas, i2cSniffer* i2c_sniffer) {
         canvas_draw_str_aligned(canvas, 30, 3, AlignLeft, AlignTop, "Nothing Recorded");
         return;
     }
-    char text_buffer[10];
+    char text_buffer[12];
+    char format_buffer[16];
     // nbFrame text
     canvas_draw_str_aligned(canvas, 3, 3, AlignLeft, AlignTop, "Frame: ");
     snprintf(
@@ -30,6 +31,12 @@ void draw_sniffer_view(Canvas* canvas, i2cSniffer* i2c_sniffer) {
         (int)i2c_sniffer->menu_index + 1,
         (int)i2c_sniffer->frame_index + 1);
     canvas_draw_str_aligned(canvas, 38, 3, AlignLeft, AlignTop, text_buffer);
+    snprintf(
+        format_buffer,
+        sizeof(format_buffer),
+        "Fmt:%s",
+        i2c_sniffer_log_format_name(i2c_sniffer->log_format));
+    canvas_draw_str_aligned(canvas, 78, 3, AlignLeft, AlignTop, format_buffer);
     // Address text
     snprintf(
         text_buffer,

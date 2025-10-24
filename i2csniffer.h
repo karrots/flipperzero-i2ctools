@@ -23,6 +23,12 @@ typedef enum { I2C_BUS_FREE, I2C_BUS_STARTED } i2cBusStates;
 
 #define I2C_SNIFFER_LOG_MESSAGE_SIZE 64
 
+typedef enum {
+    I2C_SNIFFER_LOG_FORMAT_CLASSIC = 0,
+    I2C_SNIFFER_LOG_FORMAT_PICO,
+    I2C_SNIFFER_LOG_FORMAT_COUNT,
+} i2cSnifferLogFormat;
+
 /// @brief Struct used to store our reads
 typedef struct {
     uint8_t data[MAX_MESSAGE_SIZE];
@@ -42,6 +48,7 @@ typedef struct {
     uint8_t row_index;
     bool logging_enabled;
     bool log_error_pending;
+    i2cSnifferLogFormat log_format;
     char log_error_message[I2C_SNIFFER_LOG_MESSAGE_SIZE];
     Storage* storage;
     File* log_file;
@@ -59,4 +66,6 @@ void i2c_sniffer_free(i2cSniffer* i2c_sniffer);
 bool i2c_sniffer_start_logging(i2cSniffer* i2c_sniffer);
 void i2c_sniffer_stop_logging(i2cSniffer* i2c_sniffer);
 void i2c_sniffer_finalize_current_frame(i2cSniffer* i2c_sniffer);
-
+void i2c_sniffer_cycle_log_format(i2cSniffer* i2c_sniffer);
+void i2c_sniffer_cycle_log_format_reverse(i2cSniffer* i2c_sniffer);
+const char* i2c_sniffer_log_format_name(i2cSnifferLogFormat format);
