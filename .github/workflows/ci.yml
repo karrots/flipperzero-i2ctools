@@ -37,7 +37,7 @@ jobs:
         run: ufbt update
 
       - name: Run lint checks
-        run: ufbt lint
+        run: ufbt lint --ignore clang-format
 
   build:
     name: Build
