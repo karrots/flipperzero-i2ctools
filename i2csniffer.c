@@ -3,9 +3,38 @@
 #include <storage/storage.h>
 #include <stdio.h>
 #include <string.h>
+#include <furi_hal_rtc.h>
 
 #define I2C_TOOLS_APP_DATA_DIR "/ext/apps_data/i2ctools"
-#define I2C_TOOLS_LOG_FILE_PATH I2C_TOOLS_APP_DATA_DIR "/sniffer.log"
+#define I2C_TOOLS_LOG_FILE_TEMPLATE I2C_TOOLS_APP_DATA_DIR "/sniffer-%04u%02u%02u-%02u%02u%02u.log"
+#define I2C_TOOLS_LOG_FILE_FALLBACK_TEMPLATE I2C_TOOLS_APP_DATA_DIR "/sniffer-%08lu.log"
+#define I2C_TOOLS_LOG_FILE_PATH_MAX 64
+
+static void i2c_sniffer_build_log_path(char* buffer, size_t size) {
+    if(!buffer || size == 0) {
+        return;
+    }
+    DateTime datetime = {0};
+    furi_hal_rtc_get_datetime(&datetime);
+    if(datetime.year >= 2000 && datetime.month >= 1 && datetime.day >= 1) {
+        snprintf(
+            buffer,
+            size,
+            I2C_TOOLS_LOG_FILE_TEMPLATE,
+            (unsigned int)datetime.year,
+            (unsigned int)datetime.month,
+            (unsigned int)datetime.day,
+            (unsigned int)datetime.hour,
+            (unsigned int)datetime.minute,
+            (unsigned int)datetime.second);
+    } else {
+        snprintf(
+            buffer,
+            size,
+            I2C_TOOLS_LOG_FILE_FALLBACK_TEMPLATE,
+            (unsigned long)furi_get_tick());
+    }
+}
 
 static void i2c_sniffer_reset_frame(i2cFrame* frame) {
     for(uint8_t j = 0; j < MAX_MESSAGE_SIZE; j++) {
@@ -271,16 +300,16 @@ bool i2c_sniffer_start_logging(i2cSniffer* i2c_sniffer) {
         i2c_sniffer->storage = NULL;
         return false;
     }
+    char log_file_path[I2C_TOOLS_LOG_FILE_PATH_MAX] = {0};
+    i2c_sniffer_build_log_path(log_file_path, sizeof(log_file_path));
+
     storage_common_mkdir(i2c_sniffer->storage, I2C_TOOLS_APP_DATA_DIR);
     if(!storage_file_open(
-           i2c_sniffer->log_file,
-           I2C_TOOLS_LOG_FILE_PATH,
-           FSAM_WRITE,
-           FSOM_CREATE_ALWAYS)) {
+           i2c_sniffer->log_file, log_file_path, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
         storage_common_mkdir(i2c_sniffer->storage, I2C_TOOLS_APP_DATA_DIR);
         if(!storage_file_open(
                i2c_sniffer->log_file,
-               I2C_TOOLS_LOG_FILE_PATH,
+               log_file_path,
                FSAM_WRITE,
                FSOM_CREATE_ALWAYS)) {
             storage_file_free(i2c_sniffer->log_file);
