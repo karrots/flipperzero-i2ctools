@@ -15,29 +15,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache ufbt assets
-        uses: actions/cache@v4
-        with:
-          path: ~/.ufbt
-          key: ufbt-${{ runner.os }}-${{ hashFiles('application.fam') }}
-          restore-keys: |
-            ufbt-${{ runner.os }}-
-
-      - name: Install ufbt
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade ufbt
-
-      - name: Update toolchain
-        run: ufbt update
-
       - name: Run lint checks
-        run: ufbt lint --ignore clang-format
+        uses: Flipper-Android/flipperzero-ufbt-action@v0
+        with:
+          command: lint --ignore clang-format
 
   build:
     name: Build
@@ -47,29 +28,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache ufbt assets
-        uses: actions/cache@v4
-        with:
-          path: ~/.ufbt
-          key: ufbt-${{ runner.os }}-${{ hashFiles('application.fam') }}
-          restore-keys: |
-            ufbt-${{ runner.os }}-
-
-      - name: Install ufbt
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade ufbt
-
-      - name: Update toolchain
-        run: ufbt update
-
       - name: Build FAP
-        run: ufbt fap
+        uses: Flipper-Android/flipperzero-ufbt-action@v0
+        with:
+          command: fap
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
