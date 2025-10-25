@@ -117,9 +117,28 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sniffer->row_index--;
                 }
             } else if(i2ctools->main_view->current_view == SEND_VIEW) {
-                if(i2ctools->sender->value < 0xFF) {
-                    i2ctools->sender->value++;
-                    i2ctools->sender->sended = false;
+                switch(i2ctools->sender->focus) {
+                case I2C_Sender_FocusValue:
+                    if(i2ctools->sender->value < 0xFF) {
+                        i2ctools->sender->value++;
+                        i2ctools->sender->sended = false;
+                        i2ctools->sender->result_row_offset = 0;
+                    }
+                    break;
+                case I2C_Sender_FocusLength:
+                    if(i2ctools->sender->requested_len < I2C_SENDER_RECV_BUFFER_SIZE) {
+                        i2ctools->sender->requested_len++;
+                        i2ctools->sender->sended = false;
+                        i2ctools->sender->result_row_offset = 0;
+                    }
+                    break;
+                case I2C_Sender_FocusResult:
+                    if(i2ctools->sender->result_row_offset > 0) {
+                        i2ctools->sender->result_row_offset--;
+                    }
+                    break;
+                default:
+                    break;
                 }
             }
         }
@@ -132,9 +151,40 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->scanner->menu_index -= 5;
                 }
             } else if(i2ctools->main_view->current_view == SEND_VIEW) {
-                if(i2ctools->sender->value < 0xF9) {
-                    i2ctools->sender->value += 5;
-                    i2ctools->sender->sended = false;
+                switch(i2ctools->sender->focus) {
+                case I2C_Sender_FocusValue:
+                    if(i2ctools->sender->value < 0xF9) {
+                        i2ctools->sender->value += 5;
+                        i2ctools->sender->sended = false;
+                        i2ctools->sender->result_row_offset = 0;
+                    } else {
+                        i2ctools->sender->value = 0xFF;
+                        i2ctools->sender->sended = false;
+                        i2ctools->sender->result_row_offset = 0;
+                    }
+                    break;
+                case I2C_Sender_FocusLength:
+                    if(i2ctools->sender->requested_len < I2C_SENDER_RECV_BUFFER_SIZE) {
+                        uint8_t step_target = i2ctools->sender->requested_len + 5;
+                        if(step_target > I2C_SENDER_RECV_BUFFER_SIZE) {
+                            step_target = I2C_SENDER_RECV_BUFFER_SIZE;
+                        }
+                        i2ctools->sender->requested_len = step_target;
+                        i2ctools->sender->sended = false;
+                        i2ctools->sender->result_row_offset = 0;
+                    }
+                    break;
+                case I2C_Sender_FocusResult:
+                    if(i2ctools->sender->result_row_offset > 0) {
+                        if(i2ctools->sender->result_row_offset > 4) {
+                            i2ctools->sender->result_row_offset -= 4;
+                        } else {
+                            i2ctools->sender->result_row_offset = 0;
+                        }
+                    }
+                    break;
+                default:
+                    break;
                 }
             } else if(i2ctools->main_view->current_view == SNIFF_VIEW) {
                 if(i2ctools->sniffer->row_index > 5) {
@@ -160,9 +210,36 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sniffer->row_index++;
                 }
             } else if(i2ctools->main_view->current_view == SEND_VIEW) {
-                if(i2ctools->sender->value > 0x00) {
-                    i2ctools->sender->value--;
-                    i2ctools->sender->sended = false;
+                switch(i2ctools->sender->focus) {
+                case I2C_Sender_FocusValue:
+                    if(i2ctools->sender->value > 0x00) {
+                        i2ctools->sender->value--;
+                        i2ctools->sender->sended = false;
+                        i2ctools->sender->result_row_offset = 0;
+                    }
+                    break;
+                case I2C_Sender_FocusLength:
+                    if(i2ctools->sender->requested_len > 1) {
+                        i2ctools->sender->requested_len--;
+                        i2ctools->sender->sended = false;
+                        i2ctools->sender->result_row_offset = 0;
+                    }
+                    break;
+                case I2C_Sender_FocusResult: {
+                    const uint8_t bytes_per_row = 8;
+                    const uint8_t visible_rows = 4;
+                    uint8_t total_rows =
+                        (i2ctools->sender->recv_len + (bytes_per_row - 1)) / bytes_per_row;
+                    if(total_rows > visible_rows) {
+                        uint8_t max_row_offset = total_rows - visible_rows;
+                        if(i2ctools->sender->result_row_offset < max_row_offset) {
+                            i2ctools->sender->result_row_offset++;
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;
                 }
             }
         }
@@ -171,12 +248,47 @@ int32_t i2ctools_app(void* p) {
             event.key == InputKeyDown &&
             (event.type == InputTypeLong || event.type == InputTypeRepeat)) {
             if(i2ctools->main_view->current_view == SEND_VIEW) {
-                if(i2ctools->sender->value > 0x05) {
-                    i2ctools->sender->value -= 5;
+                switch(i2ctools->sender->focus) {
+                case I2C_Sender_FocusValue:
+                    if(i2ctools->sender->value > 0x05) {
+                        i2ctools->sender->value -= 5;
+                        i2ctools->sender->sended = false;
+                        i2ctools->sender->result_row_offset = 0;
+                    } else {
+                        i2ctools->sender->value = 0;
+                        i2ctools->sender->sended = false;
+                        i2ctools->sender->result_row_offset = 0;
+                    }
+                    break;
+                case I2C_Sender_FocusLength:
+                    if(i2ctools->sender->requested_len > 5) {
+                        i2ctools->sender->requested_len -= 5;
+                    } else {
+                        i2ctools->sender->requested_len = 1;
+                    }
                     i2ctools->sender->sended = false;
-                } else {
-                    i2ctools->sender->value = 0;
-                    i2ctools->sender->sended = false;
+                    i2ctools->sender->result_row_offset = 0;
+                    break;
+                case I2C_Sender_FocusResult: {
+                    const uint8_t bytes_per_row = 8;
+                    const uint8_t visible_rows = 4;
+                    uint8_t total_rows =
+                        (i2ctools->sender->recv_len + (bytes_per_row - 1)) / bytes_per_row;
+                    if(total_rows > visible_rows) {
+                        uint8_t max_row_offset = total_rows - visible_rows;
+                        if(i2ctools->sender->result_row_offset < max_row_offset) {
+                            uint8_t step = (visible_rows > 0) ? visible_rows : 1;
+                            uint8_t next_offset = i2ctools->sender->result_row_offset + step;
+                            if(next_offset > max_row_offset) {
+                                next_offset = max_row_offset;
+                            }
+                            i2ctools->sender->result_row_offset = next_offset;
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;
                 }
             } else if(i2ctools->main_view->current_view == SNIFF_VIEW) {
                 if((i2ctools->sniffer->row_index + 8) <
@@ -222,12 +334,16 @@ int32_t i2ctools_app(void* p) {
                         i2c_sniffer_log_format_name(i2ctools->sniffer->log_format));
                     i2ctools_show_dialog_message(message);
                 }
+            } else if(i2ctools->main_view->current_view == SEND_VIEW) {
+                i2ctools->sender->focus =
+                    (i2ctools->sender->focus + 1) % I2C_Sender_FocusCount;
             }
         } else if(event.key == InputKeyRight && event.type == InputTypeRelease) {
             if(i2ctools->main_view->current_view == SEND_VIEW) {
                 if(i2ctools->sender->address_idx < (i2ctools->scanner->nb_found - 1)) {
                     i2ctools->sender->address_idx++;
                     i2ctools->sender->sended = false;
+                    i2ctools->sender->result_row_offset = 0;
                 }
             } else if(i2ctools->main_view->current_view == SNIFF_VIEW) {
                 if(i2ctools->sniffer->menu_index < i2ctools->sniffer->frame_index) {
@@ -242,6 +358,7 @@ int32_t i2ctools_app(void* p) {
                 if(i2ctools->sender->address_idx > 0) {
                     i2ctools->sender->address_idx--;
                     i2ctools->sender->sended = false;
+                    i2ctools->sender->result_row_offset = 0;
                 }
             } else if(i2ctools->main_view->current_view == SNIFF_VIEW) {
                 if(i2ctools->sniffer->menu_index > 0) {
