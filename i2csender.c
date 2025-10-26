@@ -9,7 +9,7 @@ void i2c_send(i2cSender* i2c_sender) {
         &i2c_sender->value,
         sizeof(i2c_sender->value),
         i2c_sender->recv,
-        sizeof(i2c_sender->recv),
+        I2C_SENDER_DEFAULT_RECV_LEN,
         I2C_TIMEOUT);
     furi_hal_i2c_release(I2C_BUS);
     i2c_sender->must_send = false;

@@ -15,10 +15,10 @@ void draw_sender_view(Canvas* canvas, i2cSender* i2c_sender) {
         return;
     }
     // Send Button
-    canvas_draw_rbox(canvas, 45, 48, 45, 13, 3);
+    canvas_draw_rbox(canvas, 45, 42, 45, 13, 3);
     canvas_set_color(canvas, ColorWhite);
-    canvas_draw_icon(canvas, 50, 50, &I_Ok_btn_9x9);
-    canvas_draw_str_aligned(canvas, 62, 51, AlignLeft, AlignTop, "Send");
+    canvas_draw_icon(canvas, 50, 44, &I_Ok_btn_9x9);
+    canvas_draw_str_aligned(canvas, 62, 44, AlignLeft, AlignTop, "Send");
     // Addr
     canvas_set_color(canvas, ColorBlack);
     canvas_draw_str_aligned(canvas, 3, 5, AlignLeft, AlignTop, "Addr: ");
@@ -33,20 +33,21 @@ void draw_sender_view(Canvas* canvas, i2cSender* i2c_sender) {
     canvas_draw_str_aligned(canvas, 43, 5, AlignLeft, AlignTop, addr_text);
     // Value
     canvas_draw_str_aligned(canvas, 3, 15, AlignLeft, AlignTop, "Value: ");
-    canvas_draw_icon(canvas, 33, 17, &I_ButtonUp_7x4);
-    canvas_draw_icon(canvas, 68, 17, &I_ButtonDown_7x4);
+    canvas_draw_icon(canvas, 33, 15, &I_ButtonUp_7x4);
+    canvas_draw_icon(canvas, 68, 15, &I_ButtonDown_7x4);
     snprintf(addr_text, sizeof(addr_text), "0x%02x", (int)i2c_sender->value);
     canvas_draw_str_aligned(canvas, 43, 15, AlignLeft, AlignTop, addr_text);
     if(i2c_sender->must_send) {
         i2c_send(i2c_sender);
     }
     // Result
-    canvas_draw_str_aligned(canvas, 3, 25, AlignLeft, AlignTop, "Result: ");
+    const uint8_t result_y = 20;
+    canvas_draw_str_aligned(canvas, 3, result_y, AlignLeft, AlignTop, "Result: ");
     if(i2c_sender->sended) {
         uint8_t row = 1;
         uint8_t column = 1;
         const uint8_t x_min = 3;
-        const uint8_t y_min = 25;
+        const uint8_t y_min = result_y;
         uint8_t x_pos = 0;
         uint8_t y_pos = 0;
         for(uint8_t i = 0; i < sizeof(i2c_sender->recv); i++) {
