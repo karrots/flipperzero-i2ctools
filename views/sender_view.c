@@ -41,7 +41,7 @@ void draw_sender_view(Canvas* canvas, i2cSender* i2c_sender) {
         i2c_send(i2c_sender);
     }
     // Result
-    const uint8_t result_y = 20;
+    const uint8_t result_y = 25;
     canvas_draw_str_aligned(canvas, 3, result_y, AlignLeft, AlignTop, "Result: ");
     if(i2c_sender->sended) {
         uint8_t row = 1;
