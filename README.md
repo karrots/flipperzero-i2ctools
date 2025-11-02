@@ -4,6 +4,20 @@ Set of i2c tools for Flipper Zero
 
 ![Preview](i2ctools.gif)
 
+## Dependencies
+
+Crypto features rely on Microchip's [CryptoAuthLib](https://github.com/MicrochipTech/cryptoauthlib).
+Add the library as a git submodule before building firmware with crypto
+support:
+
+```
+git submodule add https://github.com/MicrochipTech/cryptoauthlib lib/cryptoauthlib
+git submodule update --init --recursive
+```
+
+The build will continue to work without the submodule present, but crypto
+capabilities will be reported as unavailable on the device.
+
 ## Wiring
 
 C0 -> SCL

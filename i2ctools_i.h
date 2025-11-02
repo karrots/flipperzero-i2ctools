@@ -6,6 +6,7 @@
 #include "i2csniffer.h"
 #include "i2cscanner.h"
 #include "i2csender.h"
+#include "crypto/i2c_crypto_service.h"
 #include "views/main_view.h"
 #include "views/sniffer_view.h"
 #include "views/scanner_view.h"
@@ -22,4 +23,5 @@ typedef struct {
     i2cScanner* scanner;
     i2cSniffer* sniffer;
     i2cSender* sender;
+    I2CCryptoService* crypto;
 } i2cTools;

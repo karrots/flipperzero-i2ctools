@@ -1,6 +1,7 @@
 #include "i2ctools_i.h"
 
 #include <dialogs/dialogs.h>
+#include <log.h>
 #include <stdio.h>
 
 static void i2ctools_show_dialog_message(const char* text) {
@@ -86,6 +87,11 @@ int32_t i2ctools_app(void* p) {
     i2ctools->sender = i2c_sender_alloc();
     // Share scanner with sender
     i2ctools->sender->scanner = i2ctools->scanner;
+
+    i2ctools->crypto = i2c_crypto_service_alloc();
+    if(!i2ctools->crypto) {
+        FURI_LOG_W("i2ctools", "Failed to allocate crypto service context");
+    }
 
     while(furi_message_queue_get(event_queue, &event, FuriWaitForever) == FuriStatusOk) {
         // Back
@@ -269,6 +275,9 @@ int32_t i2ctools_app(void* p) {
     i2c_sniffer_free(i2ctools->sniffer);
     i2c_scanner_free(i2ctools->scanner);
     i2c_sender_free(i2ctools->sender);
+    if(i2ctools->crypto) {
+        i2c_crypto_service_free(i2ctools->crypto);
+    }
     i2c_main_view_free(i2ctools->main_view);
     free(i2ctools);
     furi_record_close(RECORD_GUI);
