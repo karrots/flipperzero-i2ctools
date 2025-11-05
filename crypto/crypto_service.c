@@ -56,6 +56,10 @@ bool crypto_session_begin(CryptoSession* session) {
         return false;
     }
 
+    // Allow device to settle after wakeup before processing commands
+    // Some commands (Info, Config reads) need more time than others
+    furi_delay_ms(10);
+
     session->is_active = true;
     return true;
 }

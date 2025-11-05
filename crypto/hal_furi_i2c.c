@@ -11,7 +11,7 @@
 #include "../lib/cryptoauthlib/lib/hal/atca_hal.h"
 #include "../lib/cryptoauthlib/lib/calib/calib_command.h"
 
-#define CRYPTO_I2C_TIMEOUT_MS (5U)
+#define CRYPTO_I2C_TIMEOUT_MS (20U)
 
 typedef struct {
     bool bus_locked;
@@ -27,9 +27,9 @@ static CryptoHalI2cCtx* crypto_get_ctx(ATCAIface iface) {
 
 static uint8_t crypto_iface_address(const ATCAIfaceCfg* cfg) {
 #ifdef ATCA_ENABLE_DEPRECATED
-    return (uint8_t)(ATCA_IFACECFG_VALUE(cfg, atcai2c.slave_address) >> 1);
+    return (uint8_t)(ATCA_IFACECFG_VALUE(cfg, atcai2c.slave_address));
 #else
-    return (uint8_t)(ATCA_IFACECFG_VALUE(cfg, atcai2c.address) >> 1);
+    return (uint8_t)(ATCA_IFACECFG_VALUE(cfg, atcai2c.address));
 #endif
 }
 
@@ -118,6 +118,12 @@ ATCA_STATUS hal_i2c_send(ATCAIface iface, uint8_t word_address, uint8_t* txdata,
 
     crypto_release_bus(ctx);
 
+    // Give device time to process command/word address before next transaction
+    // This is especially important for config zone operations
+    if(ok && word_address == 0x00) {
+        furi_delay_us(100);
+    }
+
     return ok ? ATCA_SUCCESS : ATCA_COMM_FAIL;
 }
 
@@ -137,35 +143,36 @@ ATCA_STATUS hal_i2c_receive(ATCAIface iface, uint8_t word_address, uint8_t* rxda
         return ATCA_BAD_PARAM;
     }
 
-    uint8_t address = crypto_iface_address(cfg);
-    bool ok = true;
+    // Zero the receive buffer to ensure clean state
+    memset(rxdata, 0, rx_max);
+
+    // Note: word_address parameter is actually the I2C device address to read from
+    // The actual word address byte (0x00) is sent separately via hal_i2c_send before this is called
+    // Some implementations need this, others get it from config - use word_address if valid
+    uint8_t address = (word_address != 0xFFU) ? word_address : crypto_iface_address(cfg);
 
     crypto_acquire_bus(ctx);
 
-    if(word_address != 0xFFU) {
-        const uint8_t command = word_address;
-        ok = furi_hal_i2c_tx(
-            crypto_bus_handle(),
-            address,
-            &command,
-            1U,
-            CRYPTO_I2C_TIMEOUT_MS);
-    }
-
-    if(ok) {
-        ok = furi_hal_i2c_rx(
-            crypto_bus_handle(),
-            address,
-            rxdata,
-            rx_max,
-            CRYPTO_I2C_TIMEOUT_MS);
-    }
+    const bool ok = furi_hal_i2c_rx(
+        crypto_bus_handle(),
+        address,
+        rxdata,
+        rx_max,
+        CRYPTO_I2C_TIMEOUT_MS);
 
     crypto_release_bus(ctx);
 
     if(!ok) {
         *rxlength = 0U;
         return ATCA_COMM_FAIL;
+    }
+
+    // When reading the first byte (count byte), check if it's valid
+    // For ATECC608, valid response count is always >= 4 (count + data + 2 CRC bytes)
+    // If we get 0-3, device is not ready or sending garbage - trigger polling retry
+    if(rx_max == 1 && rxdata[0] < 4) {
+        *rxlength = 0U;
+        return ATCA_RX_NO_RESPONSE;
     }
 
     if(rxdata[0] <= rx_max) {
