@@ -279,10 +279,9 @@ int32_t i2ctools_app(void* p) {
         }
         view_port_update(i2ctools->view_port);
         if(i2ctools->sniffer->log_error_pending) {
-            const char* toast_message =
-                i2ctools->sniffer->log_error_message[0] != '\0'
-                    ? i2ctools->sniffer->log_error_message
-                    : "Log write failed";
+            const char* toast_message = i2ctools->sniffer->log_error_message[0] != '\0' ?
+                                            i2ctools->sniffer->log_error_message :
+                                            "Log write failed";
             i2ctools_show_dialog_message(toast_message);
             i2ctools->sniffer->log_error_pending = false;
             i2ctools->sniffer->log_error_message[0] = '\0';

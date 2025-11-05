@@ -5,11 +5,11 @@
 #include <string.h>
 #include <furi_hal_rtc.h>
 
-#define I2C_TOOLS_APP_DATA_DIR "/ext/apps_data/i2ctools"
-#define I2C_TOOLS_LOG_FILE_TEMPLATE I2C_TOOLS_APP_DATA_DIR "/sniffer-%04u%02u%02u-%02u%02u%02u.log"
+#define I2C_TOOLS_APP_DATA_DIR               "/ext/apps_data/i2ctools"
+#define I2C_TOOLS_LOG_FILE_TEMPLATE          I2C_TOOLS_APP_DATA_DIR "/sniffer-%04u%02u%02u-%02u%02u%02u.log"
 #define I2C_TOOLS_LOG_FILE_FALLBACK_TEMPLATE I2C_TOOLS_APP_DATA_DIR "/sniffer-%08lu.log"
-#define I2C_TOOLS_LOG_FILE_PATH_MAX 64
-#define I2C_TOOLS_CONFIG_FILE_PATH I2C_TOOLS_APP_DATA_DIR "/config.bin"
+#define I2C_TOOLS_LOG_FILE_PATH_MAX          64
+#define I2C_TOOLS_CONFIG_FILE_PATH           I2C_TOOLS_APP_DATA_DIR "/config.bin"
 
 const char* i2c_sniffer_log_format_name(i2cSnifferLogFormat format) {
     switch(format) {
@@ -42,9 +42,9 @@ static void i2c_sniffer_save_config(const i2cSniffer* i2c_sniffer) {
 
 void i2c_sniffer_cycle_log_format_reverse(i2cSniffer* i2c_sniffer) {
     furi_assert(i2c_sniffer);
-    i2c_sniffer->log_format = (i2cSnifferLogFormat)(
-        (i2c_sniffer->log_format + I2C_SNIFFER_LOG_FORMAT_COUNT - 1) %
-        I2C_SNIFFER_LOG_FORMAT_COUNT);
+    i2c_sniffer->log_format =
+        (i2cSnifferLogFormat)((i2c_sniffer->log_format + I2C_SNIFFER_LOG_FORMAT_COUNT - 1) %
+                              I2C_SNIFFER_LOG_FORMAT_COUNT);
     i2c_sniffer_save_config(i2c_sniffer);
 }
 
@@ -98,10 +98,7 @@ static void i2c_sniffer_build_log_path(char* buffer, size_t size) {
             (unsigned int)datetime.second);
     } else {
         snprintf(
-            buffer,
-            size,
-            I2C_TOOLS_LOG_FILE_FALLBACK_TEMPLATE,
-            (unsigned long)furi_get_tick());
+            buffer, size, I2C_TOOLS_LOG_FILE_FALLBACK_TEMPLATE, (unsigned long)furi_get_tick());
     }
 }
 
@@ -137,11 +134,7 @@ static void i2c_sniffer_handle_log_error(i2cSniffer* i2c_sniffer, const char* me
     }
     i2c_sniffer_abort_logging(i2c_sniffer);
     if(message) {
-        snprintf(
-            i2c_sniffer->log_error_message,
-            I2C_SNIFFER_LOG_MESSAGE_SIZE,
-            "%s",
-            message);
+        snprintf(i2c_sniffer->log_error_message, I2C_SNIFFER_LOG_MESSAGE_SIZE, "%s", message);
     } else {
         i2c_sniffer->log_error_message[0] = '\0';
     }
@@ -212,10 +205,7 @@ static bool i2c_sniffer_format_classic(char* line, size_t line_size, const i2cFr
             (unsigned int)datetime.second);
     } else {
         result = snprintf(
-            line + offset,
-            line_size - offset,
-            "TIME-TICK=%08lu ",
-            (unsigned long)furi_get_tick());
+            line + offset, line_size - offset, "TIME-TICK=%08lu ", (unsigned long)furi_get_tick());
     }
     if(result < 0 || (size_t)result >= line_size - offset) {
         return false;
@@ -225,12 +215,8 @@ static bool i2c_sniffer_format_classic(char* line, size_t line_size, const i2cFr
     uint8_t address_byte = frame->data[0];
     uint8_t address = address_byte >> 1;
     bool read = (address_byte & 0x01) != 0;
-    result = snprintf(
-        line + offset,
-        line_size - offset,
-        "ADDR=0x%02X %c",
-        address,
-        read ? 'R' : 'W');
+    result =
+        snprintf(line + offset, line_size - offset, "ADDR=0x%02X %c", address, read ? 'R' : 'W');
     if(result < 0 || (size_t)result >= line_size - offset) {
         return false;
     }
@@ -238,11 +224,7 @@ static bool i2c_sniffer_format_classic(char* line, size_t line_size, const i2cFr
 
     uint8_t data_start = 1;
     if(!read && frame->data_index > 1) {
-        result = snprintf(
-            line + offset,
-            line_size - offset,
-            " CMD=0x%02X",
-            frame->data[1]);
+        result = snprintf(line + offset, line_size - offset, " CMD=0x%02X", frame->data[1]);
         if(result < 0 || (size_t)result >= line_size - offset) {
             return false;
         }
@@ -455,14 +437,10 @@ bool i2c_sniffer_start_logging(i2cSniffer* i2c_sniffer) {
     i2c_sniffer_build_log_path(log_file_path, sizeof(log_file_path));
 
     storage_common_mkdir(i2c_sniffer->storage, I2C_TOOLS_APP_DATA_DIR);
-    if(!storage_file_open(
-           i2c_sniffer->log_file, log_file_path, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
+    if(!storage_file_open(i2c_sniffer->log_file, log_file_path, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
         storage_common_mkdir(i2c_sniffer->storage, I2C_TOOLS_APP_DATA_DIR);
         if(!storage_file_open(
-               i2c_sniffer->log_file,
-               log_file_path,
-               FSAM_WRITE,
-               FSOM_CREATE_ALWAYS)) {
+               i2c_sniffer->log_file, log_file_path, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
             storage_file_free(i2c_sniffer->log_file);
             i2c_sniffer->log_file = NULL;
             furi_record_close(RECORD_STORAGE);

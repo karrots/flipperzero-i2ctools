@@ -10,8 +10,8 @@
 #include <string.h>
 
 #define CRYPTO_DEFAULT_I2C_ADDRESS (0x60U)
-#define CRYPTO_WAKE_DELAY_US (1600U)
-#define CRYPTO_RX_RETRIES (20U)
+#define CRYPTO_WAKE_DELAY_US       (1600U)
+#define CRYPTO_RX_RETRIES          (20U)
 
 static void crypto_populate_default_cfg(ATCAIfaceCfg* cfg) {
     furi_assert(cfg);

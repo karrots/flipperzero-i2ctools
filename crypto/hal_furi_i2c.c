@@ -110,11 +110,7 @@ ATCA_STATUS hal_i2c_send(ATCAIface iface, uint8_t word_address, uint8_t* txdata,
     crypto_acquire_bus(ctx);
 
     const bool ok = furi_hal_i2c_tx(
-        crypto_bus_handle(),
-        crypto_iface_address(cfg),
-        buffer,
-        index,
-        CRYPTO_I2C_TIMEOUT_MS);
+        crypto_bus_handle(), crypto_iface_address(cfg), buffer, index, CRYPTO_I2C_TIMEOUT_MS);
 
     crypto_release_bus(ctx);
 
@@ -127,7 +123,8 @@ ATCA_STATUS hal_i2c_send(ATCAIface iface, uint8_t word_address, uint8_t* txdata,
     return ok ? ATCA_SUCCESS : ATCA_COMM_FAIL;
 }
 
-ATCA_STATUS hal_i2c_receive(ATCAIface iface, uint8_t word_address, uint8_t* rxdata, uint16_t* rxlength) {
+ATCA_STATUS
+hal_i2c_receive(ATCAIface iface, uint8_t word_address, uint8_t* rxdata, uint16_t* rxlength) {
     if((iface == NULL) || (rxdata == NULL) || (rxlength == NULL)) {
         return ATCA_BAD_PARAM;
     }
@@ -153,12 +150,8 @@ ATCA_STATUS hal_i2c_receive(ATCAIface iface, uint8_t word_address, uint8_t* rxda
 
     crypto_acquire_bus(ctx);
 
-    const bool ok = furi_hal_i2c_rx(
-        crypto_bus_handle(),
-        address,
-        rxdata,
-        rx_max,
-        CRYPTO_I2C_TIMEOUT_MS);
+    const bool ok =
+        furi_hal_i2c_rx(crypto_bus_handle(), address, rxdata, rx_max, CRYPTO_I2C_TIMEOUT_MS);
 
     crypto_release_bus(ctx);
 

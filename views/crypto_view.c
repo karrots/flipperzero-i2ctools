@@ -30,7 +30,8 @@ struct CryptoView {
     CryptoSession session;
 };
 
-static const uint8_t crypto_safe_slots[] = {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U, 15U};
+static const uint8_t crypto_safe_slots[] =
+    {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U, 15U};
 
 static const char* crypto_action_labels[CryptoActionCount] = {
     "Detect Device",
@@ -122,15 +123,21 @@ static void crypto_view_show_paginated_data(
         // Build dynamic header with page indicator
         char full_header[64] = {0};
         if(total_pages > 1U) {
-            snprintf(full_header, sizeof(full_header), "%s (%zu/%zu)",
-                     header, current_page + 1U, total_pages);
+            snprintf(
+                full_header,
+                sizeof(full_header),
+                "%s (%zu/%zu)",
+                header,
+                current_page + 1U,
+                total_pages);
         } else {
             snprintf(full_header, sizeof(full_header), "%s", header);
         }
 
         // Show navigation buttons only when needed
         const char* left_btn = (total_pages > 1U && current_page > 0U) ? "Prev" : NULL;
-        const char* right_btn = (total_pages > 1U && current_page + 1U < total_pages) ? "Next" : NULL;
+        const char* right_btn = (total_pages > 1U && current_page + 1U < total_pages) ? "Next" :
+                                                                                        NULL;
 
         dialog_message_set_header(message, full_header, 64, 4, AlignCenter, AlignTop);
         dialog_message_set_text(message, body, 4, 16, AlignLeft, AlignTop);
@@ -156,7 +163,8 @@ static void crypto_view_show_paginated_data(
     furi_record_close(RECORD_DIALOGS);
 }
 
-static void crypto_view_show_status_error(const char* header, const char* context, ATCA_STATUS status) {
+static void
+    crypto_view_show_status_error(const char* header, const char* context, ATCA_STATUS status) {
     char buffer[96];
     if(status == ATCA_SUCCESS) {
         snprintf(buffer, sizeof(buffer), "%s", context);
@@ -202,7 +210,8 @@ static void crypto_view_action_detect(CryptoView* view) {
 
     // Try to read config zone
     uint8_t config_data[ATCA_BLOCK_SIZE] = {0};
-    ATCA_STATUS config_status = atcab_read_zone(ATCA_ZONE_CONFIG, 0U, 0U, 0U, config_data, ATCA_BLOCK_SIZE);
+    ATCA_STATUS config_status =
+        atcab_read_zone(ATCA_ZONE_CONFIG, 0U, 0U, 0U, config_data, ATCA_BLOCK_SIZE);
 
     // Check lock status (may fail if config unreadable)
     bool config_locked = false;
@@ -217,37 +226,48 @@ static void crypto_view_action_detect(CryptoView* view) {
         if(revision[2] == 0x60U) {
             device_text = (revision[3] >= 0x03U) ? "ATECC608B" : "ATECC608A";
         }
-        len += snprintf(msg + len, sizeof(msg) - len,
+        len += snprintf(
+            msg + len,
+            sizeof(msg) - len,
             "%s detected\nRev: %02X%02X%02X%02X\n",
-            device_text, revision[0], revision[1], revision[2], revision[3]);
+            device_text,
+            revision[0],
+            revision[1],
+            revision[2],
+            revision[3]);
 
         if(lock_cfg_status == ATCA_SUCCESS) {
-            len += snprintf(msg + len, sizeof(msg) - len,
-                "Config: %s\n", config_locked ? "LOCKED" : "unlocked");
+            len += snprintf(
+                msg + len,
+                sizeof(msg) - len,
+                "Config: %s\n",
+                config_locked ? "LOCKED" : "unlocked");
         }
         if(lock_data_status == ATCA_SUCCESS) {
-            len += snprintf(msg + len, sizeof(msg) - len,
-                "Data: %s", data_locked ? "LOCKED" : "unlocked");
+            len += snprintf(
+                msg + len, sizeof(msg) - len, "Data: %s", data_locked ? "LOCKED" : "unlocked");
         }
     } else if(config_status == ATCA_SUCCESS) {
         // Config readable but Info failed - unusual case
-        len += snprintf(msg + len, sizeof(msg) - len,
+        len += snprintf(
+            msg + len,
+            sizeof(msg) - len,
             "ATECC608 detected\nConfig zone readable\nInfo cmd blocked\n");
-        len += snprintf(msg + len, sizeof(msg) - len,
+        len += snprintf(
+            msg + len,
+            sizeof(msg) - len,
             "SN bytes: %02X%02X%02X%02X",
-            config_data[0], config_data[1], config_data[2], config_data[3]);
+            config_data[0],
+            config_data[1],
+            config_data[2],
+            config_data[3]);
     } else {
         // Config zone locked/restricted - this is your chip's state
-        len += snprintf(msg + len, sizeof(msg) - len,
-            "ATECC608B detected\n\n");
-        len += snprintf(msg + len, sizeof(msg) - len,
-            "Config zone: LOCKED\n");
-        len += snprintf(msg + len, sizeof(msg) - len,
-            "Info access: BLOCKED\n\n");
-        len += snprintf(msg + len, sizeof(msg) - len,
-            "Available features:\n");
-        len += snprintf(msg + len, sizeof(msg) - len,
-            "- Random\n- Self-Test\n- Slot Peek");
+        len += snprintf(msg + len, sizeof(msg) - len, "ATECC608B detected\n\n");
+        len += snprintf(msg + len, sizeof(msg) - len, "Config zone: LOCKED\n");
+        len += snprintf(msg + len, sizeof(msg) - len, "Info access: BLOCKED\n\n");
+        len += snprintf(msg + len, sizeof(msg) - len, "Available features:\n");
+        len += snprintf(msg + len, sizeof(msg) - len, "- Random\n- Self-Test\n- Slot Peek");
     }
 
     crypto_view_idle_session(view);
@@ -285,7 +305,8 @@ static void crypto_view_action_info(CryptoView* view) {
     if(info_status == ATCA_SUCCESS && serial_status == ATCA_SUCCESS) {
         // Full access - show all info
         char serial_hex[3U * ATCA_SERIAL_NUM_SIZE] = {0};
-        crypto_view_format_rows(serial_hex, sizeof(serial_hex), serial, ATCA_SERIAL_NUM_SIZE, ATCA_SERIAL_NUM_SIZE);
+        crypto_view_format_rows(
+            serial_hex, sizeof(serial_hex), serial, ATCA_SERIAL_NUM_SIZE, ATCA_SERIAL_NUM_SIZE);
 
         const char* device_text = "Unknown";
         if(revision[2] == 0x60U) {
@@ -321,13 +342,10 @@ static void crypto_view_action_info(CryptoView* view) {
     } else {
         // Serial works but info failed - unusual
         char serial_hex[3U * ATCA_SERIAL_NUM_SIZE] = {0};
-        crypto_view_format_rows(serial_hex, sizeof(serial_hex), serial, ATCA_SERIAL_NUM_SIZE, ATCA_SERIAL_NUM_SIZE);
+        crypto_view_format_rows(
+            serial_hex, sizeof(serial_hex), serial, ATCA_SERIAL_NUM_SIZE, ATCA_SERIAL_NUM_SIZE);
 
-        snprintf(
-            body,
-            sizeof(body),
-            "ATECC608\nSN:\n%s\nDevRev: unavailable",
-            serial_hex);
+        snprintf(body, sizeof(body), "ATECC608\nSN:\n%s\nDevRev: unavailable", serial_hex);
     }
 
     crypto_view_idle_session(view);
@@ -389,7 +407,8 @@ static void crypto_view_action_self_test(CryptoView* view) {
     for(size_t i = 0; i < failure_count; i++) {
         if((result & failures[i].mask) != 0U) {
             if(written < sizeof(fail_text)) {
-                written += snprintf(fail_text + written, sizeof(fail_text) - written, "%s\n", failures[i].label);
+                written += snprintf(
+                    fail_text + written, sizeof(fail_text) - written, "%s\n", failures[i].label);
             }
         }
     }
@@ -568,7 +587,8 @@ void draw_crypto_view(Canvas* canvas, CryptoView* view) {
         char slot_label[24] = {0};
         const char* label = crypto_action_labels[i];
         if(i == CryptoActionSlotPeek) {
-            snprintf(slot_label, sizeof(slot_label), "Slot Peek (S%u)", crypto_view_current_slot(view));
+            snprintf(
+                slot_label, sizeof(slot_label), "Slot Peek (S%u)", crypto_view_current_slot(view));
             label = slot_label;
         }
 

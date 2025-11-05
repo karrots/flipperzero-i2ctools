@@ -11,7 +11,10 @@ typedef struct File File;
 #define pinSDA &gpio_ext_pc1
 
 // Bus States
-typedef enum { I2C_BUS_FREE, I2C_BUS_STARTED } i2cBusStates;
+typedef enum {
+    I2C_BUS_FREE,
+    I2C_BUS_STARTED
+} i2cBusStates;
 
 // Max read size of i2c frame by message
 // Arbitraly defined
