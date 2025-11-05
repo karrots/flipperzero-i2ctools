@@ -30,7 +30,7 @@ struct CryptoView {
     CryptoSession session;
 };
 
-static const uint8_t crypto_safe_slots[] = {8U, 9U, 10U, 11U};
+static const uint8_t crypto_safe_slots[] = {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U, 15U};
 
 static const char* crypto_action_labels[CryptoActionCount] = {
     "Detect Device",
@@ -193,47 +193,65 @@ static void crypto_view_action_detect(CryptoView* view) {
         return;
     }
 
-    char debug_msg[256];
-    int msg_len = 0;
+    char msg[256];
+    int len = 0;
 
-    // Test 1: Read from data zone (known to work)
-    uint8_t test_data[ATCA_BLOCK_SIZE] = {0};
-    ATCA_STATUS status = atcab_read_zone(ATCA_ZONE_DATA, 8U, 0U, 0U, test_data, ATCA_BLOCK_SIZE);
-    msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
-        "Data zone: 0x%02X\n", (uint8_t)status);
-
-    // Test 2: Try reading from config zone (full 32-byte block)
-    uint8_t config_data[ATCA_BLOCK_SIZE] = {0};
-    status = atcab_read_zone(ATCA_ZONE_CONFIG, 0U, 0U, 0U, config_data, ATCA_BLOCK_SIZE);
-    msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
-        "Config 32B: 0x%02X\n", (uint8_t)status);
-
-    if(status == ATCA_SUCCESS) {
-        msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
-            "First 4: %02X %02X %02X %02X\n",
-            config_data[0], config_data[1], config_data[2], config_data[3]);
-    }
-
-    // Test 2b: Try reading 4-byte word from config zone
-    uint8_t config_word[4] = {0};
-    status = atcab_read_zone(ATCA_ZONE_CONFIG, 0U, 0U, 0U, config_word, sizeof(config_word));
-    msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
-        "Config 4B: 0x%02X\n", (uint8_t)status);
-
-    // Test 3: Info command
+    // Try to get device info via Info command
     uint8_t revision[INFO_SIZE] = {0};
-    status = atcab_info(revision);
-    msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
-        "Info cmd: 0x%02X\n", (uint8_t)status);
+    ATCA_STATUS info_status = atcab_info(revision);
 
-    if(status == ATCA_SUCCESS) {
-        msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
-            "Rev: %02X %02X %02X %02X",
-            revision[0], revision[1], revision[2], revision[3]);
+    // Try to read config zone
+    uint8_t config_data[ATCA_BLOCK_SIZE] = {0};
+    ATCA_STATUS config_status = atcab_read_zone(ATCA_ZONE_CONFIG, 0U, 0U, 0U, config_data, ATCA_BLOCK_SIZE);
+
+    // Check lock status (may fail if config unreadable)
+    bool config_locked = false;
+    bool data_locked = false;
+    ATCA_STATUS lock_cfg_status = atcab_is_config_locked(&config_locked);
+    ATCA_STATUS lock_data_status = atcab_is_data_locked(&data_locked);
+
+    // Build message based on what we can access
+    if(info_status == ATCA_SUCCESS) {
+        // Full access - show device info
+        const char* device_text = "ATECC608";
+        if(revision[2] == 0x60U) {
+            device_text = (revision[3] >= 0x03U) ? "ATECC608B" : "ATECC608A";
+        }
+        len += snprintf(msg + len, sizeof(msg) - len,
+            "%s detected\nRev: %02X%02X%02X%02X\n",
+            device_text, revision[0], revision[1], revision[2], revision[3]);
+
+        if(lock_cfg_status == ATCA_SUCCESS) {
+            len += snprintf(msg + len, sizeof(msg) - len,
+                "Config: %s\n", config_locked ? "LOCKED" : "unlocked");
+        }
+        if(lock_data_status == ATCA_SUCCESS) {
+            len += snprintf(msg + len, sizeof(msg) - len,
+                "Data: %s", data_locked ? "LOCKED" : "unlocked");
+        }
+    } else if(config_status == ATCA_SUCCESS) {
+        // Config readable but Info failed - unusual case
+        len += snprintf(msg + len, sizeof(msg) - len,
+            "ATECC608 detected\nConfig zone readable\nInfo cmd blocked\n");
+        len += snprintf(msg + len, sizeof(msg) - len,
+            "SN bytes: %02X%02X%02X%02X",
+            config_data[0], config_data[1], config_data[2], config_data[3]);
+    } else {
+        // Config zone locked/restricted - this is your chip's state
+        len += snprintf(msg + len, sizeof(msg) - len,
+            "ATECC608B detected\n\n");
+        len += snprintf(msg + len, sizeof(msg) - len,
+            "Config zone: LOCKED\n");
+        len += snprintf(msg + len, sizeof(msg) - len,
+            "Info access: BLOCKED\n\n");
+        len += snprintf(msg + len, sizeof(msg) - len,
+            "Available features:\n");
+        len += snprintf(msg + len, sizeof(msg) - len,
+            "- Random\n- Self-Test\n- Slot Peek");
     }
 
     crypto_view_idle_session(view);
-    crypto_view_show_dialog("Detect Device", debug_msg, true);
+    crypto_view_show_dialog("Detect Device", msg, true);
 }
 
 static void crypto_view_action_info(CryptoView* view) {
@@ -244,39 +262,73 @@ static void crypto_view_action_info(CryptoView* view) {
     uint8_t revision[INFO_SIZE] = {0};
     uint8_t serial[ATCA_SERIAL_NUM_SIZE] = {0};
 
-    ATCA_STATUS status = atcab_read_serial_number(serial);
-    if(status != ATCA_SUCCESS) {
-        crypto_view_idle_session(view);
-        crypto_view_show_status_error("Chip Info", "Serial read failed", status);
-        return;
-    }
-
-    status = atcab_info(revision);
-    if(status != ATCA_SUCCESS) {
-        crypto_view_idle_session(view);
-        crypto_view_show_status_error("Chip Info", "Info command failed", status);
-        return;
-    }
-
-    char serial_hex[3U * ATCA_SERIAL_NUM_SIZE] = {0};
-    crypto_view_format_rows(serial_hex, sizeof(serial_hex), serial, ATCA_SERIAL_NUM_SIZE, ATCA_SERIAL_NUM_SIZE);
-
-    const char* device_text = "Unknown";
-    if(revision[2] == 0x60U) {
-        device_text = (revision[3] >= 0x03U) ? "ATECC608B" : "ATECC608";
-    }
+    ATCA_STATUS serial_status = atcab_read_serial_number(serial);
+    ATCA_STATUS info_status = atcab_info(revision);
 
     char body[192];
-    snprintf(
-        body,
-        sizeof(body),
-        "%s\nSN:\n%s\nDevRev %02X %02X %02X %02X",
-        device_text,
-        serial_hex,
-        revision[0],
-        revision[1],
-        revision[2],
-        revision[3]);
+
+    if(serial_status != ATCA_SUCCESS && info_status != ATCA_SUCCESS) {
+        // Config zone locked - show helpful message
+        snprintf(
+            body,
+            sizeof(body),
+            "Config zone locked\n\n"
+            "This chip has restricted\n"
+            "access to device info.\n\n"
+            "Use 'Detect Device' to\n"
+            "see available features.");
+        crypto_view_idle_session(view);
+        crypto_view_show_dialog("Chip Info", body, true);
+        return;
+    }
+
+    if(info_status == ATCA_SUCCESS && serial_status == ATCA_SUCCESS) {
+        // Full access - show all info
+        char serial_hex[3U * ATCA_SERIAL_NUM_SIZE] = {0};
+        crypto_view_format_rows(serial_hex, sizeof(serial_hex), serial, ATCA_SERIAL_NUM_SIZE, ATCA_SERIAL_NUM_SIZE);
+
+        const char* device_text = "Unknown";
+        if(revision[2] == 0x60U) {
+            device_text = (revision[3] >= 0x03U) ? "ATECC608B" : "ATECC608";
+        }
+
+        snprintf(
+            body,
+            sizeof(body),
+            "%s\nSN:\n%s\nDevRev %02X %02X %02X %02X",
+            device_text,
+            serial_hex,
+            revision[0],
+            revision[1],
+            revision[2],
+            revision[3]);
+    } else if(info_status == ATCA_SUCCESS) {
+        // Info works but serial read failed
+        const char* device_text = "Unknown";
+        if(revision[2] == 0x60U) {
+            device_text = (revision[3] >= 0x03U) ? "ATECC608B" : "ATECC608";
+        }
+
+        snprintf(
+            body,
+            sizeof(body),
+            "%s\nSN: unavailable\nDevRev %02X %02X %02X %02X",
+            device_text,
+            revision[0],
+            revision[1],
+            revision[2],
+            revision[3]);
+    } else {
+        // Serial works but info failed - unusual
+        char serial_hex[3U * ATCA_SERIAL_NUM_SIZE] = {0};
+        crypto_view_format_rows(serial_hex, sizeof(serial_hex), serial, ATCA_SERIAL_NUM_SIZE, ATCA_SERIAL_NUM_SIZE);
+
+        snprintf(
+            body,
+            sizeof(body),
+            "ATECC608\nSN:\n%s\nDevRev: unavailable",
+            serial_hex);
+    }
 
     crypto_view_idle_session(view);
     crypto_view_show_dialog("Chip Info", body, true);
