@@ -6,23 +6,27 @@
 
 #define SCAN_MENU_TEXT "Scan"
 #define SCAN_MENU_X 90
-#define SCAN_MENU_Y 6
+#define SCAN_MENU_Y 2
 
 #define SNIFF_MENU_TEXT "Sniff"
 #define SNIFF_MENU_X 90
-#define SNIFF_MENU_Y 18
+#define SNIFF_MENU_Y 12
 
 #define CONFIG_MENU_TEXT "Config"
 #define CONFIG_MENU_X 90
-#define CONFIG_MENU_Y 30
+#define CONFIG_MENU_Y 22
 
 #define SEND_MENU_TEXT "Send"
 #define SEND_MENU_X 90
-#define SEND_MENU_Y 42
+#define SEND_MENU_Y 32
 
 #define INFOS_MENU_TEXT "Infos"
 #define INFOS_MENU_X 90
-#define INFOS_MENU_Y 54
+#define INFOS_MENU_Y 42
+
+#define CRYPTO_MENU_TEXT "Crypto"
+#define CRYPTO_MENU_X 90
+#define CRYPTO_MENU_Y 52
 
 // Menu
 typedef enum {
@@ -32,6 +36,7 @@ typedef enum {
     CONFIG_VIEW,
     SEND_VIEW,
     INFOS_VIEW,
+    CRYPTO_VIEW,
 
     /* Know menu Size*/
     MENU_SIZE

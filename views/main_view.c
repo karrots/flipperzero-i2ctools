@@ -19,6 +19,8 @@ void draw_main_view(Canvas* canvas, i2cMainView* main_view) {
         canvas, SEND_MENU_X, SEND_MENU_Y, AlignLeft, AlignTop, SEND_MENU_TEXT);
     canvas_draw_str_aligned(
         canvas, INFOS_MENU_X, INFOS_MENU_Y, AlignLeft, AlignTop, INFOS_MENU_TEXT);
+    canvas_draw_str_aligned(
+        canvas, CRYPTO_MENU_X, CRYPTO_MENU_Y, AlignLeft, AlignTop, CRYPTO_MENU_TEXT);
 
     // Highlight current selection
     switch(main_view->menu_index) {
@@ -55,6 +57,13 @@ void draw_main_view(Canvas* canvas, i2cMainView* main_view) {
         canvas_set_color(canvas, ColorWhite);
         canvas_draw_str_aligned(
             canvas, INFOS_MENU_X, INFOS_MENU_Y, AlignLeft, AlignTop, INFOS_MENU_TEXT);
+        break;
+
+    case CRYPTO_VIEW:
+        canvas_draw_rbox(canvas, 80, CRYPTO_MENU_Y - 2, 43, 13, 3);
+        canvas_set_color(canvas, ColorWhite);
+        canvas_draw_str_aligned(
+            canvas, CRYPTO_MENU_X, CRYPTO_MENU_Y, AlignLeft, AlignTop, CRYPTO_MENU_TEXT);
         break;
 
     default:

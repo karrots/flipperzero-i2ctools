@@ -12,6 +12,7 @@
 #include "views/sender_view.h"
 #include "views/infos_view.h"
 #include "views/config_view.h"
+#include "views/crypto_view.h"
 
 // App datas
 typedef struct {
@@ -22,4 +23,5 @@ typedef struct {
     i2cScanner* scanner;
     i2cSniffer* sniffer;
     i2cSender* sender;
+    CryptoView* crypto;
 } i2cTools;

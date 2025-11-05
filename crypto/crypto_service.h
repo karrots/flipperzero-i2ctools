@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../lib/cryptoauthlib/include/cryptoauthlib.h"
+#include "../lib/cryptoauthlib/lib/cryptoauthlib.h"
 
 typedef enum {
     CryptoDeviceIdle,
@@ -29,4 +29,3 @@ ATCA_STATUS crypto_run_command(
     size_t* rx_len);
 
 bool crypto_info_smoke_test(uint8_t* revision_buffer, size_t buffer_size);
-

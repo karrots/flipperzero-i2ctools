@@ -45,6 +45,10 @@ void i2ctools_draw_callback(Canvas* canvas, void* ctx) {
         draw_infos_view(canvas);
         break;
 
+    case CRYPTO_VIEW:
+        draw_crypto_view(canvas, i2ctools->crypto);
+        break;
+
     default:
         break;
     }
@@ -87,6 +91,8 @@ int32_t i2ctools_app(void* p) {
     // Share scanner with sender
     i2ctools->sender->scanner = i2ctools->scanner;
 
+    i2ctools->crypto = crypto_view_alloc();
+
     while(furi_message_queue_get(event_queue, &event, FuriWaitForever) == FuriStatusOk) {
         // Back
         if(event.key == InputKeyBack && event.type == InputTypeRelease) {
@@ -98,6 +104,8 @@ int32_t i2ctools_app(void* p) {
                     i2c_sniffer_stop_logging(i2ctools->sniffer);
                     i2ctools->sniffer->started = false;
                     i2ctools->sniffer->state = I2C_BUS_FREE;
+                } else if(i2ctools->main_view->current_view == CRYPTO_VIEW) {
+                    crypto_view_exit(i2ctools->crypto);
                 }
                 i2ctools->main_view->current_view = MAIN_VIEW;
             }
@@ -121,6 +129,8 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sender->value++;
                     i2ctools->sender->sended = false;
                 }
+            } else if(i2ctools->main_view->current_view == CRYPTO_VIEW) {
+                crypto_view_select_previous(i2ctools->crypto);
             }
         }
         // Long Up
@@ -142,6 +152,8 @@ int32_t i2ctools_app(void* p) {
                 } else {
                     i2ctools->sniffer->row_index = 0;
                 }
+            } else if(i2ctools->main_view->current_view == CRYPTO_VIEW) {
+                crypto_view_select_previous(i2ctools->crypto);
             }
         }
         // Down
@@ -164,6 +176,8 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sender->value--;
                     i2ctools->sender->sended = false;
                 }
+            } else if(i2ctools->main_view->current_view == CRYPTO_VIEW) {
+                crypto_view_select_next(i2ctools->crypto);
             }
         }
         // Long Down
@@ -183,11 +197,16 @@ int32_t i2ctools_app(void* p) {
                    (int)i2ctools->sniffer->frames[i2ctools->sniffer->menu_index].data_index) {
                     i2ctools->sniffer->row_index += 5;
                 }
+            } else if(i2ctools->main_view->current_view == CRYPTO_VIEW) {
+                crypto_view_select_next(i2ctools->crypto);
             }
 
         } else if(event.key == InputKeyOk && event.type == InputTypeRelease) {
             if(i2ctools->main_view->current_view == MAIN_VIEW) {
                 i2ctools->main_view->current_view = i2ctools->main_view->menu_index;
+                if(i2ctools->main_view->current_view == CRYPTO_VIEW) {
+                    crypto_view_enter(i2ctools->crypto);
+                }
             } else if(i2ctools->main_view->current_view == SCAN_VIEW) {
                 scan_i2c_bus(i2ctools->scanner);
             } else if(i2ctools->main_view->current_view == SEND_VIEW) {
@@ -207,6 +226,8 @@ int32_t i2ctools_app(void* p) {
                     i2ctools->sniffer->started = true;
                     i2ctools->sniffer->state = I2C_BUS_FREE;
                 }
+            } else if(i2ctools->main_view->current_view == CRYPTO_VIEW) {
+                crypto_view_execute_selected(i2ctools->crypto);
             }
         } else if(event.key == InputKeyOk && event.type == InputTypeLong) {
             if(i2ctools->main_view->current_view == SNIFF_VIEW) {
@@ -236,6 +257,8 @@ int32_t i2ctools_app(void* p) {
                 }
             } else if(i2ctools->main_view->current_view == CONFIG_VIEW) {
                 i2c_sniffer_cycle_log_format(i2ctools->sniffer);
+            } else if(i2ctools->main_view->current_view == CRYPTO_VIEW) {
+                crypto_view_adjust_slot(i2ctools->crypto, 1);
             }
         } else if(event.key == InputKeyLeft && event.type == InputTypeRelease) {
             if(i2ctools->main_view->current_view == SEND_VIEW) {
@@ -250,6 +273,8 @@ int32_t i2ctools_app(void* p) {
                 }
             } else if(i2ctools->main_view->current_view == CONFIG_VIEW) {
                 i2c_sniffer_cycle_log_format_reverse(i2ctools->sniffer);
+            } else if(i2ctools->main_view->current_view == CRYPTO_VIEW) {
+                crypto_view_adjust_slot(i2ctools->crypto, -1);
             }
         }
         view_port_update(i2ctools->view_port);
@@ -269,6 +294,7 @@ int32_t i2ctools_app(void* p) {
     i2c_sniffer_free(i2ctools->sniffer);
     i2c_scanner_free(i2ctools->scanner);
     i2c_sender_free(i2ctools->sender);
+    crypto_view_free(i2ctools->crypto);
     i2c_main_view_free(i2ctools->main_view);
     free(i2ctools);
     furi_record_close(RECORD_GUI);

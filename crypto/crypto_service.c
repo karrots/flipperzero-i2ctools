@@ -1,7 +1,13 @@
 #include "crypto_service.h"
 
+#include "../lib/cryptoauthlib/lib/atca_basic.h"
+#include "../lib/cryptoauthlib/lib/calib/calib_command.h"
+#include "../lib/cryptoauthlib/lib/calib/calib_packet.h"
+#include "../lib/cryptoauthlib/lib/calib/calib_execution.h"
+
 #include <furi.h>
 #include <furi_hal.h>
+#include <string.h>
 
 #define CRYPTO_DEFAULT_I2C_ADDRESS (0x60U)
 #define CRYPTO_WAKE_DELAY_US (1600U)
@@ -9,8 +15,17 @@
 
 static void crypto_populate_default_cfg(ATCAIfaceCfg* cfg) {
     furi_assert(cfg);
-    cfg->i2c_address = CRYPTO_DEFAULT_I2C_ADDRESS;
-    cfg->bus_khz = 100;
+    memset(cfg, 0, sizeof(*cfg));
+
+    cfg->iface_type = ATCA_I2C_IFACE;
+    cfg->devtype = ATECC608;
+#ifdef ATCA_ENABLE_DEPRECATED
+    cfg->atcai2c.slave_address = (uint8_t)(CRYPTO_DEFAULT_I2C_ADDRESS << 1U);
+#else
+    cfg->atcai2c.address = (uint8_t)(CRYPTO_DEFAULT_I2C_ADDRESS << 1U);
+#endif
+    cfg->atcai2c.bus = 0;
+    cfg->atcai2c.baud = 100000U;
     cfg->wake_delay = CRYPTO_WAKE_DELAY_US;
     cfg->rx_retries = CRYPTO_RX_RETRIES;
 }
@@ -31,12 +46,12 @@ bool crypto_session_begin(CryptoSession* session) {
     crypto_populate_default_cfg(&session->iface_cfg);
 
     ATCA_STATUS status = atcab_init(&session->iface_cfg);
-    if(status != ATCA_STATUS_SUCCESS) {
+    if(status != ATCA_SUCCESS) {
         return false;
     }
 
     status = atcab_wakeup();
-    if(status != ATCA_STATUS_SUCCESS) {
+    if(status != ATCA_SUCCESS) {
         atcab_release();
         return false;
     }
@@ -72,14 +87,60 @@ ATCA_STATUS crypto_run_command(
     furi_assert(session);
 
     if(!session->is_active) {
-        return ATCA_STATUS_NOT_INITIALIZED;
+        return ATCA_NOT_INITIALIZED;
     }
 
-    return atcab_transceive(tx, tx_len, rx, rx_max, rx_len);
+    if((tx == NULL) || (tx_len < ATCA_CMD_SIZE_MIN)) {
+        return ATCA_BAD_PARAM;
+    }
+
+    if(tx_len > CA_MAX_PACKET_SIZE) {
+        return ATCA_INVALID_SIZE;
+    }
+
+    const uint8_t count = tx[ATCA_COUNT_IDX];
+    if(count != tx_len) {
+        return ATCA_INVALID_SIZE;
+    }
+
+    ATCADevice device = atcab_get_device();
+    if(device == NULL) {
+        return ATCA_NOT_INITIALIZED;
+    }
+
+    ATCAPacket* packet = calib_packet_alloc();
+    if(packet == NULL) {
+        return ATCA_ALLOC_FAILURE;
+    }
+
+    memset(packet, 0, sizeof(*packet));
+    memcpy(&packet->txsize, tx, tx_len);
+
+    ATCA_STATUS status = calib_execute_command(packet, device);
+
+    if(status == ATCA_SUCCESS) {
+        if(rx_len != NULL) {
+            *rx_len = 0;
+        }
+
+        if(rx != NULL && rx_len != NULL) {
+            const uint8_t response_len = packet->data[ATCA_COUNT_IDX];
+
+            if(response_len > rx_max) {
+                status = ATCA_SMALL_BUFFER;
+            } else {
+                memcpy(rx, packet->data, response_len);
+                *rx_len = response_len;
+            }
+        }
+    }
+
+    calib_packet_free(packet);
+    return status;
 }
 
 bool crypto_info_smoke_test(uint8_t* revision_buffer, size_t buffer_size) {
-    if((revision_buffer == NULL) || (buffer_size < ATCA_INFO_SIZE)) {
+    if((revision_buffer == NULL) || (buffer_size < INFO_SIZE)) {
         return false;
     }
 
@@ -93,6 +154,5 @@ bool crypto_info_smoke_test(uint8_t* revision_buffer, size_t buffer_size) {
     ATCA_STATUS status = atcab_info(revision_buffer);
     crypto_session_end(&session, CryptoDeviceSleep);
 
-    return status == ATCA_STATUS_SUCCESS;
+    return status == ATCA_SUCCESS;
 }
-
