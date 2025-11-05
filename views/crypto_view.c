@@ -26,6 +26,7 @@ typedef enum {
 struct CryptoView {
     CryptoViewAction selected;
     size_t slot_index;
+    size_t page;
     CryptoSession session;
 };
 
@@ -46,21 +47,13 @@ static void crypto_view_show_dialog(const char* header, const char* text, bool l
     dialog_message_set_header(message, header, 64, 4, AlignCenter, AlignTop);
     const Align align = left_align ? AlignLeft : AlignCenter;
     const Align valign = left_align ? AlignTop : AlignCenter;
-    dialog_message_set_text(message, text, 64, 32, align, valign);
+    const uint8_t text_x = left_align ? 4U : 64U;
+    const uint8_t text_y = left_align ? 16U : 32U;
+    dialog_message_set_text(message, text, text_x, text_y, align, valign);
     dialog_message_set_buttons(message, NULL, "OK", NULL);
     dialog_message_show(dialogs, message);
     dialog_message_free(message);
     furi_record_close(RECORD_DIALOGS);
-}
-
-static void crypto_view_show_status_error(const char* header, const char* context, ATCA_STATUS status) {
-    char buffer[96];
-    if(status == ATCA_SUCCESS) {
-        snprintf(buffer, sizeof(buffer), "%s", context);
-    } else {
-        snprintf(buffer, sizeof(buffer), "%s\nStatus 0x%02X", context, (uint8_t)status);
-    }
-    crypto_view_show_dialog(header, buffer, true);
 }
 
 static void crypto_view_format_rows(
@@ -99,8 +92,88 @@ static void crypto_view_format_rows(
     }
 }
 
+static void crypto_view_show_paginated_data(
+    const char* header,
+    const uint8_t* data,
+    size_t data_size,
+    size_t bytes_per_page,
+    const char* label_prefix) {
+    DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
+    DialogMessage* message = dialog_message_alloc();
+
+    const size_t total_pages = (data_size + bytes_per_page - 1U) / bytes_per_page;
+    size_t current_page = 0U;
+
+    while(true) {
+        const size_t offset = current_page * bytes_per_page;
+        const size_t remaining = data_size - offset;
+        const size_t page_bytes = (remaining < bytes_per_page) ? remaining : bytes_per_page;
+
+        char data_text[80] = {0};
+        crypto_view_format_rows(data_text, sizeof(data_text), data + offset, page_bytes, 8U);
+
+        char body[128] = {0};
+        if(label_prefix != NULL) {
+            snprintf(body, sizeof(body), "%s:\n%s", label_prefix, data_text);
+        } else {
+            snprintf(body, sizeof(body), "%s", data_text);
+        }
+
+        // Build dynamic header with page indicator
+        char full_header[64] = {0};
+        if(total_pages > 1U) {
+            snprintf(full_header, sizeof(full_header), "%s (%zu/%zu)",
+                     header, current_page + 1U, total_pages);
+        } else {
+            snprintf(full_header, sizeof(full_header), "%s", header);
+        }
+
+        // Show navigation buttons only when needed
+        const char* left_btn = (total_pages > 1U && current_page > 0U) ? "Prev" : NULL;
+        const char* right_btn = (total_pages > 1U && current_page + 1U < total_pages) ? "Next" : NULL;
+
+        dialog_message_set_header(message, full_header, 64, 4, AlignCenter, AlignTop);
+        dialog_message_set_text(message, body, 4, 16, AlignLeft, AlignTop);
+        dialog_message_set_buttons(message, left_btn, NULL, right_btn);
+
+        const DialogMessageButton result = dialog_message_show(dialogs, message);
+
+        if(result == DialogMessageButtonLeft) {
+            if(current_page > 0U) {
+                current_page--;
+            } else {
+                current_page = total_pages - 1U;
+            }
+        } else if(result == DialogMessageButtonRight) {
+            current_page = (current_page + 1U) % total_pages;
+        } else {
+            // Back button or dialog closed - exit
+            break;
+        }
+    }
+
+    dialog_message_free(message);
+    furi_record_close(RECORD_DIALOGS);
+}
+
+static void crypto_view_show_status_error(const char* header, const char* context, ATCA_STATUS status) {
+    char buffer[96];
+    if(status == ATCA_SUCCESS) {
+        snprintf(buffer, sizeof(buffer), "%s", context);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%s\nStatus 0x%02X", context, (uint8_t)status);
+    }
+    crypto_view_show_dialog(header, buffer, true);
+}
+
 static bool crypto_view_open_session(CryptoView* view, const char* header) {
     furi_assert(view);
+
+    // Always close any existing session to ensure fresh device state
+    if(view->session.is_active) {
+        crypto_session_end(&view->session, CryptoDeviceIdle);
+    }
+
     if(crypto_session_begin(&view->session)) {
         return true;
     }
@@ -120,32 +193,47 @@ static void crypto_view_action_detect(CryptoView* view) {
         return;
     }
 
+    char debug_msg[256];
+    int msg_len = 0;
+
+    // Test 1: Read from data zone (known to work)
+    uint8_t test_data[ATCA_BLOCK_SIZE] = {0};
+    ATCA_STATUS status = atcab_read_zone(ATCA_ZONE_DATA, 8U, 0U, 0U, test_data, ATCA_BLOCK_SIZE);
+    msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
+        "Data zone: 0x%02X\n", (uint8_t)status);
+
+    // Test 2: Try reading from config zone (full 32-byte block)
+    uint8_t config_data[ATCA_BLOCK_SIZE] = {0};
+    status = atcab_read_zone(ATCA_ZONE_CONFIG, 0U, 0U, 0U, config_data, ATCA_BLOCK_SIZE);
+    msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
+        "Config 32B: 0x%02X\n", (uint8_t)status);
+
+    if(status == ATCA_SUCCESS) {
+        msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
+            "First 4: %02X %02X %02X %02X\n",
+            config_data[0], config_data[1], config_data[2], config_data[3]);
+    }
+
+    // Test 2b: Try reading 4-byte word from config zone
+    uint8_t config_word[4] = {0};
+    status = atcab_read_zone(ATCA_ZONE_CONFIG, 0U, 0U, 0U, config_word, sizeof(config_word));
+    msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
+        "Config 4B: 0x%02X\n", (uint8_t)status);
+
+    // Test 3: Info command
     uint8_t revision[INFO_SIZE] = {0};
-    ATCA_STATUS status = atcab_info(revision);
-    if(status != ATCA_SUCCESS) {
-        crypto_view_idle_session(view);
-        crypto_view_show_status_error("Detect Device", "Info command failed", status);
-        return;
-    }
+    status = atcab_info(revision);
+    msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
+        "Info cmd: 0x%02X\n", (uint8_t)status);
 
-    const char* device_text = "Unknown";
-    if(revision[2] == 0x60U) {
-        device_text = (revision[3] >= 0x03U) ? "ATECC608B" : "ATECC608";
+    if(status == ATCA_SUCCESS) {
+        msg_len += snprintf(debug_msg + msg_len, sizeof(debug_msg) - msg_len,
+            "Rev: %02X %02X %02X %02X",
+            revision[0], revision[1], revision[2], revision[3]);
     }
-
-    char body[96];
-    snprintf(
-        body,
-        sizeof(body),
-        "%s detected\nDevRev %02X %02X %02X %02X",
-        device_text,
-        revision[0],
-        revision[1],
-        revision[2],
-        revision[3]);
 
     crypto_view_idle_session(view);
-    crypto_view_show_dialog("Detect Device", body, true);
+    crypto_view_show_dialog("Detect Device", debug_msg, true);
 }
 
 static void crypto_view_action_info(CryptoView* view) {
@@ -207,11 +295,8 @@ static void crypto_view_action_random(CryptoView* view) {
         return;
     }
 
-    char data_text[3U * sizeof(random_bytes)] = {0};
-    crypto_view_format_rows(data_text, sizeof(data_text), random_bytes, sizeof(random_bytes), 8U);
-
     crypto_view_idle_session(view);
-    crypto_view_show_dialog("Random", data_text, true);
+    crypto_view_show_paginated_data("Random", random_bytes, sizeof(random_bytes), 24U, NULL);
 }
 
 static void crypto_view_action_self_test(CryptoView* view) {
@@ -276,16 +361,11 @@ static void crypto_view_action_slot_peek(CryptoView* view) {
         return;
     }
 
-    char data_text[3U * ATCA_BLOCK_SIZE] = {0};
-    crypto_view_format_rows(data_text, sizeof(data_text), slot_data, ATCA_BLOCK_SIZE, 8U);
-
     crypto_view_idle_session(view);
 
-    char body[sizeof(data_text) + 32U];
-    snprintf(body, sizeof(body), "Slot %u block0:\n%s", slot, data_text);
-    crypto_view_show_dialog("Slot Peek", body, true);
-
-    view->slot_index = (view->slot_index + 1U) % (sizeof(crypto_safe_slots) / sizeof(crypto_safe_slots[0]));
+    char header[32] = {0};
+    snprintf(header, sizeof(header), "Slot %u block0", slot);
+    crypto_view_show_paginated_data(header, slot_data, ATCA_BLOCK_SIZE, 24U, NULL);
 }
 
 static void crypto_view_action_sleep(CryptoView* view) {
@@ -306,6 +386,7 @@ CryptoView* crypto_view_alloc(void) {
     crypto_session_init(&view->session);
     view->selected = CryptoActionDetect;
     view->slot_index = 0U;
+    view->page = 0U;
     return view;
 }
 
@@ -325,6 +406,7 @@ void crypto_view_enter(CryptoView* view) {
     furi_assert(view);
     view->selected = CryptoActionDetect;
     view->slot_index = 0U;
+    view->page = 0U;
 }
 
 void crypto_view_exit(CryptoView* view) {
@@ -338,6 +420,7 @@ void crypto_view_select_previous(CryptoView* view) {
     furi_assert(view);
     if(view->selected > 0) {
         view->selected = (CryptoViewAction)(view->selected - 1);
+        view->page = view->selected / 4U;
     }
 }
 
@@ -345,6 +428,7 @@ void crypto_view_select_next(CryptoView* view) {
     furi_assert(view);
     if(view->selected + 1 < CryptoActionCount) {
         view->selected = (CryptoViewAction)(view->selected + 1);
+        view->page = view->selected / 4U;
     }
 }
 
@@ -413,14 +497,21 @@ void draw_crypto_view(Canvas* canvas, CryptoView* view) {
     canvas_draw_str_aligned(canvas, 6, 4, AlignLeft, AlignTop, "Crypto Actions");
 
     const uint8_t list_start_y = 14U;
-    const uint8_t line_step = 8U;
+    const uint8_t line_step = 10U;
     const uint8_t highlight_x = 4U;
     const uint8_t highlight_width = 120U;
     const uint8_t highlight_height = 11U;
     const uint8_t text_x = 8U;
+    const size_t items_per_page = 4U;
 
-    for(size_t i = 0; i < CryptoActionCount; i++) {
-        const uint8_t y = list_start_y + (uint8_t)(i * line_step);
+    const size_t page_start = view->page * items_per_page;
+    const size_t page_end = (page_start + items_per_page < CryptoActionCount) ?
+                                (page_start + items_per_page) :
+                                CryptoActionCount;
+
+    for(size_t i = page_start; i < page_end; i++) {
+        const size_t display_index = i - page_start;
+        const uint8_t y = list_start_y + (uint8_t)(display_index * line_step);
 
         char slot_label[24] = {0};
         const char* label = crypto_action_labels[i];
@@ -437,5 +528,13 @@ void draw_crypto_view(Canvas* canvas, CryptoView* view) {
         } else {
             canvas_draw_str_aligned(canvas, text_x, y, AlignLeft, AlignTop, label);
         }
+    }
+
+    // Draw page indicators if multiple pages
+    const size_t total_pages = (CryptoActionCount + items_per_page - 1U) / items_per_page;
+    if(total_pages > 1U) {
+        char page_text[8];
+        snprintf(page_text, sizeof(page_text), "%zu/%zu", view->page + 1U, total_pages);
+        canvas_draw_str_aligned(canvas, 64, 54, AlignCenter, AlignTop, page_text);
     }
 }
