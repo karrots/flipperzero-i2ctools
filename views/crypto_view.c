@@ -4,6 +4,8 @@
 
 #include <dialogs/dialogs.h>
 #include <furi.h>
+#include <gui/modules/text_box.h>
+#include <gui/view_holder.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,110 +64,58 @@ static void crypto_view_show_dialog(const char* header, const char* text, bool l
     furi_record_close(RECORD_DIALOGS);
 }
 
-static void crypto_view_format_rows(
-    char* out,
-    size_t out_size,
-    const uint8_t* data,
-    size_t data_size,
-    size_t per_row) {
-    if((out == NULL) || (out_size == 0) || (data == NULL) || (data_size == 0) || (per_row == 0)) {
-        return;
-    }
-
-    size_t written = 0;
-    for(size_t i = 0; i < data_size; i++) {
-        if(written + 3 >= out_size) {
-            break;
-        }
-
-        written += snprintf(out + written, out_size - written, "%02X", data[i]);
-
-        if(i + 1 == data_size) {
-            break;
-        }
-
-        if(((i + 1U) % per_row) == 0U) {
-            out[written++] = '\n';
-        } else {
-            out[written++] = ' ';
-        }
-    }
-
-    if(written < out_size) {
-        out[written] = '\0';
-    } else {
-        out[out_size - 1U] = '\0';
-    }
+static void crypto_view_textbox_back_callback(void* context) {
+    furi_assert(context);
+    FuriSemaphore* semaphore = context;
+    furi_semaphore_release(semaphore);
 }
 
-static void crypto_view_show_paginated_data(
-    const char* header,
-    const uint8_t* data,
-    size_t data_size,
-    size_t bytes_per_page,
-    const char* label_prefix) {
-    DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
-    DialogMessage* message = dialog_message_alloc();
+static void crypto_view_show_textbox(const char* header, const char* text, TextBoxFont font) {
+    // Allocate TextBox
+    TextBox* textbox = text_box_alloc();
 
-    const size_t total_pages = (data_size + bytes_per_page - 1U) / bytes_per_page;
-    size_t current_page = 0U;
+    // Configure TextBox
+    text_box_set_font(textbox, font);
+    text_box_set_focus(textbox, TextBoxFocusStart);
 
-    while(true) {
-        const size_t offset = current_page * bytes_per_page;
-        const size_t remaining = data_size - offset;
-        const size_t page_bytes = (remaining < bytes_per_page) ? remaining : bytes_per_page;
-
-        char data_text[80] = {0};
-        crypto_view_format_rows(data_text, sizeof(data_text), data + offset, page_bytes, 8U);
-
-        char body[128] = {0};
-        if(label_prefix != NULL) {
-            snprintf(body, sizeof(body), "%s:\n%s", label_prefix, data_text);
-        } else {
-            snprintf(body, sizeof(body), "%s", data_text);
-        }
-
-        // Build dynamic header with page indicator
-        char full_header[64] = {0};
-        if(total_pages > 1U) {
-            snprintf(
-                full_header,
-                sizeof(full_header),
-                "%s (%zu/%zu)",
-                header,
-                current_page + 1U,
-                total_pages);
-        } else {
-            snprintf(full_header, sizeof(full_header), "%s", header);
-        }
-
-        // Show navigation buttons only when needed
-        const char* left_btn = (total_pages > 1U && current_page > 0U) ? "Prev" : NULL;
-        const char* right_btn = (total_pages > 1U && current_page + 1U < total_pages) ? "Next" :
-                                                                                        NULL;
-
-        dialog_message_set_header(message, full_header, 64, 4, AlignCenter, AlignTop);
-        dialog_message_set_text(message, body, 4, 16, AlignLeft, AlignTop);
-        dialog_message_set_buttons(message, left_btn, NULL, right_btn);
-
-        const DialogMessageButton result = dialog_message_show(dialogs, message);
-
-        if(result == DialogMessageButtonLeft) {
-            if(current_page > 0U) {
-                current_page--;
-            } else {
-                current_page = total_pages - 1U;
-            }
-        } else if(result == DialogMessageButtonRight) {
-            current_page = (current_page + 1U) % total_pages;
-        } else {
-            // Back button or dialog closed - exit
-            break;
-        }
+    // Build header with text content
+    FuriString* content = furi_string_alloc();
+    if(header != NULL) {
+        furi_string_cat_printf(content, "%s\n\n%s", header, text);
+    } else {
+        furi_string_cat_str(content, text);
     }
+    text_box_set_text(textbox, furi_string_get_cstr(content));
 
-    dialog_message_free(message);
-    furi_record_close(RECORD_DIALOGS);
+    // Create semaphore for blocking until back button is pressed
+    FuriSemaphore* semaphore = furi_semaphore_alloc(1, 0);
+
+    // Get view and attach to GUI via ViewHolder
+    ViewHolder* view_holder = view_holder_alloc();
+    view_holder_set_view(view_holder, text_box_get_view(textbox));
+    view_holder_set_back_callback(view_holder, crypto_view_textbox_back_callback, semaphore);
+
+    // Attach to GUI
+    Gui* gui = furi_record_open(RECORD_GUI);
+    view_holder_attach_to_gui(view_holder, gui);
+    view_holder_send_to_front(view_holder);
+
+    // Wait for back button press
+    furi_semaphore_acquire(semaphore, FuriWaitForever);
+
+    // Free resources in proper order
+    // First, detach view from holder and send to back
+    view_holder_set_view(view_holder, NULL);
+    view_holder_send_to_back(view_holder);
+
+    // Now free the holder and close GUI
+    view_holder_free(view_holder);
+    furi_record_close(RECORD_GUI);
+
+    // Free the TextBox and other resources
+    text_box_free(textbox);
+    furi_semaphore_free(semaphore);
+    furi_string_free(content);
 }
 
 static void
@@ -340,7 +290,7 @@ static void crypto_view_action_detect(CryptoView* view) {
     }
 
     crypto_view_idle_session(view);
-    crypto_view_show_dialog("Detect Device", msg, true);
+    crypto_view_show_textbox("Detect Device", msg, TextBoxFontText);
 }
 
 static void crypto_view_action_info(CryptoView* view) {
@@ -378,7 +328,7 @@ static void crypto_view_action_info(CryptoView* view) {
             "Serial number: BLOCKED\n"
             "No further info available");
         crypto_view_idle_session(view);
-        crypto_view_show_dialog("Chip Info", body, true);
+        crypto_view_show_textbox("Chip Info", body, TextBoxFontText);
         return;
     }
 
@@ -462,7 +412,7 @@ static void crypto_view_action_info(CryptoView* view) {
     }
 
     crypto_view_idle_session(view);
-    crypto_view_show_dialog("Chip Info", body, true);
+    crypto_view_show_textbox("Chip Info", body, TextBoxFontText);
 }
 
 static void crypto_view_action_random(CryptoView* view) {
@@ -479,7 +429,22 @@ static void crypto_view_action_random(CryptoView* view) {
     }
 
     crypto_view_idle_session(view);
-    crypto_view_show_paginated_data("Random", random_bytes, sizeof(random_bytes), 24U, NULL);
+
+    // Format random bytes with newlines after every 7 bytes
+    char hex_text[128] = {0};
+    size_t offset = 0;
+    for(size_t i = 0; i < sizeof(random_bytes) && offset < sizeof(hex_text) - 3; i++) {
+        offset += snprintf(hex_text + offset, sizeof(hex_text) - offset, "%02X", random_bytes[i]);
+        if(i + 1 < sizeof(random_bytes) && offset < sizeof(hex_text) - 1) {
+            // Add newline after every 7 bytes, otherwise add space
+            if((i + 1) % 7 == 0) {
+                hex_text[offset++] = '\n';
+            } else {
+                hex_text[offset++] = ' ';
+            }
+        }
+    }
+    crypto_view_show_textbox("Random", hex_text, TextBoxFontHex);
 }
 
 static void crypto_view_action_self_test(CryptoView* view) {
@@ -547,9 +512,24 @@ static void crypto_view_action_slot_peek(CryptoView* view) {
 
     crypto_view_idle_session(view);
 
+    // Format slot data with newlines after every 7 bytes
+    char hex_text[128] = {0};
+    size_t offset = 0;
+    for(size_t i = 0; i < ATCA_BLOCK_SIZE && offset < sizeof(hex_text) - 3; i++) {
+        offset += snprintf(hex_text + offset, sizeof(hex_text) - offset, "%02X", slot_data[i]);
+        if(i + 1 < ATCA_BLOCK_SIZE && offset < sizeof(hex_text) - 1) {
+            // Add newline after every 7 bytes, otherwise add space
+            if((i + 1) % 7 == 0) {
+                hex_text[offset++] = '\n';
+            } else {
+                hex_text[offset++] = ' ';
+            }
+        }
+    }
+
     char header[32] = {0};
     snprintf(header, sizeof(header), "Slot %u block0", slot);
-    crypto_view_show_paginated_data(header, slot_data, ATCA_BLOCK_SIZE, 24U, NULL);
+    crypto_view_show_textbox(header, hex_text, TextBoxFontHex);
 }
 
 static void crypto_view_action_sleep(CryptoView* view) {
