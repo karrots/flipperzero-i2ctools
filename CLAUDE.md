@@ -1,0 +1,1 @@
+Use the industry standard AGENTS.md file instead of this.
