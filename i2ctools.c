@@ -1,6 +1,9 @@
 #include "i2ctools_i.h"
+#include "cli/crypto_cli.h"
 
 #include <dialogs/dialogs.h>
+#include <cli/cli.h>
+#include <cli/cli_registry.h>
 #include <stdio.h>
 
 static void i2ctools_show_dialog_message(const char* text) {
@@ -92,6 +95,13 @@ int32_t i2ctools_app(void* p) {
     i2ctools->sender->scanner = i2ctools->scanner;
 
     i2ctools->crypto = crypto_view_alloc();
+
+    // Register CLI command for ATECC608B crypto operations
+    // This allows CLI access via: atecc session open, atecc mac, etc.
+    CliRegistry* cli_registry = furi_record_open(RECORD_CLI);
+    crypto_cli_init(); // Initialize internal command registry
+    cli_registry_add_command(cli_registry, "atecc", CliCommandFlagParallelSafe, crypto_cli_handler, NULL);
+    furi_record_close(RECORD_CLI);
 
     while(furi_message_queue_get(event_queue, &event, FuriWaitForever) == FuriStatusOk) {
         // Back
@@ -287,6 +297,14 @@ int32_t i2ctools_app(void* p) {
             i2ctools->sniffer->log_error_message[0] = '\0';
         }
     }
+
+    // Unregister CLI command before app exit to prevent crashes
+    // CRITICAL: Must be called before app exits or Flipper will crash if command is invoked
+    cli_registry = furi_record_open(RECORD_CLI);
+    cli_registry_delete_command(cli_registry, "atecc");
+    furi_record_close(RECORD_CLI);
+    crypto_cli_cleanup(); // Cleanup internal command registry
+
     gui_remove_view_port(gui, i2ctools->view_port);
     view_port_free(i2ctools->view_port);
     furi_message_queue_free(event_queue);
