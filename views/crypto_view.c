@@ -12,6 +12,11 @@
 #include "../lib/cryptoauthlib/lib/cryptoauthlib.h"
 #include "../lib/cryptoauthlib/lib/calib/calib_basic.h"
 #include "../lib/cryptoauthlib/lib/calib/calib_command.h"
+#include "../lib/cryptoauthlib/lib/atcacert/atcacert_client.h"
+#include "../lib/cryptoauthlib/lib/atcacert/atcacert_def.h"
+#include "../lib/cryptoauthlib/lib/atcacert/atcacert_der.h"
+#include "../lib/cryptoauthlib/app/tng/tng_atcacert_client.h"
+#include "../lib/cryptoauthlib/app/tng/tng_atca.h"
 
 typedef enum {
     CryptoActionDetect = 0,
@@ -51,7 +56,7 @@ static void crypto_view_show_dialog(const char* header, const char* text, bool l
     const uint8_t text_x = left_align ? 4U : 64U;
     const uint8_t text_y = left_align ? 16U : 32U;
     dialog_message_set_text(message, text, text_x, text_y, align, valign);
-    dialog_message_set_buttons(message, NULL, "OK", NULL);
+    dialog_message_set_buttons(message, NULL, NULL, NULL);
     dialog_message_show(dialogs, message);
     dialog_message_free(message);
     furi_record_close(RECORD_DIALOGS);
@@ -196,6 +201,70 @@ static void crypto_view_idle_session(CryptoView* view) {
     }
 }
 
+/**
+ * @brief Retrieves device serial number from X.509 certificate in data zone
+ *
+ * This function implements a workaround for ATECC608B devices where the config zone
+ * is locked and atcab_read_serial_number() fails.
+ *
+ * IMPORTANT: This ONLY works for Trust & Go (TNG) pre-provisioned devices that have
+ * an X.509 certificate stored in the data zone. For non-TNG devices, there is no
+ * alternative method to retrieve the serial number if config zone reads fail.
+ *
+ * Background:
+ * - Serial number is stored in Config Zone bytes [0:3, 8:12]
+ * - Standard method uses atcab_read_serial_number() which reads config zone
+ * - Info command has NO mode for reading serial number (only revision, GPIO, etc.)
+ * - If config zone is locked/restricted, standard method returns error 0xE6
+ * - TNG devices store X.509 cert in data zone which contains serial number
+ *
+ * @param serial_out Buffer to receive the serial number bytes (must be at least 32 bytes)
+ * @param serial_len_out Pointer to receive the actual length of the serial number
+ * @return ATCA_STATUS ATCA_SUCCESS on success, error code otherwise
+ */
+static ATCA_STATUS crypto_view_read_serial_from_cert(uint8_t* serial_out, size_t* serial_len_out) {
+    if(serial_out == NULL || serial_len_out == NULL) {
+        return ATCA_BAD_PARAM;
+    }
+
+    ATCA_STATUS status;
+
+    // Try TNG certificate reading (for Trust & Go pre-provisioned devices)
+    size_t max_cert_size = 0;
+    status = tng_atcacert_max_device_cert_size(&max_cert_size);
+
+    if(status == ATCA_SUCCESS && max_cert_size > 0 && max_cert_size <= 2048) {
+        // This appears to be a TNG device, try full certificate reading
+        uint8_t* cert_data = malloc(max_cert_size);
+        if(cert_data != NULL) {
+            size_t cert_size = max_cert_size;
+            status = tng_atcacert_read_device_cert(cert_data, &cert_size, NULL);
+
+            if(status == ATCA_SUCCESS) {
+                // Successfully read certificate, now extract serial number
+                const atcacert_def_t* cert_def = NULL;
+                status = tng_get_device_cert_def(&cert_def);
+
+                if(status == ATCA_SUCCESS && cert_def != NULL) {
+                    size_t sn_size = *serial_len_out;
+                    status = atcacert_get_cert_sn(cert_def, cert_data, cert_size, serial_out, &sn_size);
+
+                    if(status == ATCA_SUCCESS) {
+                        *serial_len_out = sn_size;
+                        free(cert_data);
+                        return ATCA_SUCCESS;
+                    }
+                }
+            }
+            free(cert_data);
+        }
+    }
+
+    // No certificate found or device is not TNG type
+    // Serial number is not accessible through any standard method
+    return ATCA_GEN_FAIL;
+}
+
 static void crypto_view_action_detect(CryptoView* view) {
     if(!crypto_view_open_session(view, "Detect Device")) {
         return;
@@ -265,7 +334,7 @@ static void crypto_view_action_detect(CryptoView* view) {
         // Config zone locked/restricted - this is your chip's state
         len += snprintf(msg + len, sizeof(msg) - len, "ATECC608B detected\n\n");
         len += snprintf(msg + len, sizeof(msg) - len, "Config zone: LOCKED\n");
-        len += snprintf(msg + len, sizeof(msg) - len, "Info access: BLOCKED\n\n");
+        len += snprintf(msg + len, sizeof(msg) - len, "Info access: BLOCKED\n");
         len += snprintf(msg + len, sizeof(msg) - len, "Available features:\n");
         len += snprintf(msg + len, sizeof(msg) - len, "- Random\n- Self-Test\n- Slot Peek");
     }
@@ -280,23 +349,34 @@ static void crypto_view_action_info(CryptoView* view) {
     }
 
     uint8_t revision[INFO_SIZE] = {0};
-    uint8_t serial[ATCA_SERIAL_NUM_SIZE] = {0};
+    uint8_t serial[32] = {0}; // Increased size to handle variable-length cert serial
+    size_t serial_len = ATCA_SERIAL_NUM_SIZE;
+    bool cert_method_used = false;
 
+    // Try standard method first
     ATCA_STATUS serial_status = atcab_read_serial_number(serial);
+
+    // If standard method fails, try certificate-based retrieval
+    if(serial_status != ATCA_SUCCESS) {
+        serial_status = crypto_view_read_serial_from_cert(serial, &serial_len);
+        if(serial_status == ATCA_SUCCESS) {
+            cert_method_used = true;
+        }
+    }
+
     ATCA_STATUS info_status = atcab_info(revision);
 
-    char body[192];
+    char body[256]; // Increased to accommodate cert message
 
     if(serial_status != ATCA_SUCCESS && info_status != ATCA_SUCCESS) {
-        // Config zone locked - show helpful message
+        // Config zone locked, no certificate, no accessible serial number
         snprintf(
             body,
             sizeof(body),
-            "Config zone locked\n\n"
-            "This chip has restricted\n"
-            "access to device info.\n\n"
-            "Use 'Detect Device' to\n"
-            "see available features.");
+            "Config zone: LOCKED\n"
+            "Info access: BLOCKED\n"
+            "Serial number: BLOCKED\n"
+            "No further info available");
         crypto_view_idle_session(view);
         crypto_view_show_dialog("Chip Info", body, true);
         return;
@@ -304,25 +384,44 @@ static void crypto_view_action_info(CryptoView* view) {
 
     if(info_status == ATCA_SUCCESS && serial_status == ATCA_SUCCESS) {
         // Full access - show all info
-        char serial_hex[3U * ATCA_SERIAL_NUM_SIZE] = {0};
-        crypto_view_format_rows(
-            serial_hex, sizeof(serial_hex), serial, ATCA_SERIAL_NUM_SIZE, ATCA_SERIAL_NUM_SIZE);
+        // Step 4: Format and Display the Serial Number
+        char serial_hex[128] = {0}; // Larger buffer for variable-length serial
+        size_t hex_written = 0;
+        for(size_t i = 0; i < serial_len && hex_written < sizeof(serial_hex) - 3; i++) {
+            hex_written += snprintf(serial_hex + hex_written, sizeof(serial_hex) - hex_written, "%02X", serial[i]);
+            if(i + 1 < serial_len) {
+                serial_hex[hex_written++] = ' ';
+            }
+        }
 
         const char* device_text = "Unknown";
         if(revision[2] == 0x60U) {
             device_text = (revision[3] >= 0x03U) ? "ATECC608B" : "ATECC608";
         }
 
-        snprintf(
-            body,
-            sizeof(body),
-            "%s\nSN:\n%s\nDevRev %02X %02X %02X %02X",
-            device_text,
-            serial_hex,
-            revision[0],
-            revision[1],
-            revision[2],
-            revision[3]);
+        if(cert_method_used) {
+            snprintf(
+                body,
+                sizeof(body),
+                "%s\nSN (slot):\n%s\nDevRev %02X %02X %02X %02X",
+                device_text,
+                serial_hex,
+                revision[0],
+                revision[1],
+                revision[2],
+                revision[3]);
+        } else {
+            snprintf(
+                body,
+                sizeof(body),
+                "%s\nSN:\n%s\nDevRev %02X %02X %02X %02X",
+                device_text,
+                serial_hex,
+                revision[0],
+                revision[1],
+                revision[2],
+                revision[3]);
+        }
     } else if(info_status == ATCA_SUCCESS) {
         // Info works but serial read failed
         const char* device_text = "Unknown";
@@ -340,12 +439,26 @@ static void crypto_view_action_info(CryptoView* view) {
             revision[2],
             revision[3]);
     } else {
-        // Serial works but info failed - unusual
-        char serial_hex[3U * ATCA_SERIAL_NUM_SIZE] = {0};
-        crypto_view_format_rows(
-            serial_hex, sizeof(serial_hex), serial, ATCA_SERIAL_NUM_SIZE, ATCA_SERIAL_NUM_SIZE);
+        // Serial works but info failed - unusual case (cert-based chip)
+        // Step 4: Format and Display the Serial Number
+        char serial_hex[128] = {0};
+        size_t hex_written = 0;
+        for(size_t i = 0; i < serial_len && hex_written < sizeof(serial_hex) - 3; i++) {
+            hex_written += snprintf(serial_hex + hex_written, sizeof(serial_hex) - hex_written, "%02X", serial[i]);
+            if(i + 1 < serial_len) {
+                serial_hex[hex_written++] = ' ';
+            }
+        }
 
-        snprintf(body, sizeof(body), "ATECC608\nSN:\n%s\nDevRev: unavailable", serial_hex);
+        if(cert_method_used) {
+            snprintf(
+                body,
+                sizeof(body),
+                "ATECC608B\nSN (slot):\n%s\nDevRev: restricted",
+                serial_hex);
+        } else {
+            snprintf(body, sizeof(body), "ATECC608\nSN:\n%s\nDevRev: unavailable", serial_hex);
+        }
     }
 
     crypto_view_idle_session(view);

@@ -43,6 +43,7 @@ App(
                 "lib/atca_iface.c",
                 "lib/atca_utils_sizes.c",
                 "lib/cal_buffer.c",
+                "lib/crypto/atca_crypto_sw_sha1.c",
                 "lib/crypto/atca_crypto_sw_sha2.c",
                 "lib/crypto/hashes/sha1_routines.c",
                 "lib/crypto/hashes/sha2_routines.c",
@@ -78,20 +79,41 @@ App(
                 "lib/calib/calib_updateextra.c",
                 "lib/calib/calib_verify.c",
                 "lib/calib/calib_write.c",
+                # Certificate support files
+                "lib/atcacert/atcacert_client.c",
+                "lib/atcacert/atcacert_date.c",
+                "lib/atcacert/atcacert_def.c",
+                "lib/atcacert/atcacert_der.c",
+                "lib/atcacert/atcacert_host_hw.c",
+                "lib/atcacert/atcacert_host_sw.c",
+                # TNG (Trust & Go) support files
+                "app/tng/tng_atca.c",
+                "app/tng/tng_atcacert_client.c",
+                "app/tng/tngtls_cert_def_1_signer.c",
+                "app/tng/tngtls_cert_def_2_device.c",
+                "app/tng/tngtls_cert_def_3_device.c",
+                "app/tng/tnglora_cert_def_1_signer.c",
+                "app/tng/tnglora_cert_def_2_device.c",
+                "app/tng/tnglora_cert_def_4_device.c",
+                "app/tng/tflxtls_cert_def_4_device.c",
             ],
             
             # Include paths for your APP (relative to "lib/cryptoauthlib/")
             fap_include_paths=[
                 "lib",
                 "lib/hal",
+                "lib/atcacert",
+                "app/tng",
                 "../../crypto", # Provides crypto/atca_config.h to your app files
             ],
-            
+
             # Include paths for the LIBRARY (relative to app root)
             cincludes=[
                 "crypto",               # Provides crypto/atca_config.h to the library files
                 "lib/cryptoauthlib/lib",
                 "lib/cryptoauthlib/lib/hal",
+                "lib/cryptoauthlib/lib/atcacert",
+                "lib/cryptoauthlib/app/tng",
             ],
 
             cdefines=[
@@ -100,7 +122,7 @@ App(
                 "ATCA_TA_SUPPORT=0",
                 "ATCAC_SHA384_EN=0",
                 "ATCAC_SHA512_EN=0",
-                "ATCACERT_COMPCERT_EN=0",
+                "ATCACERT_COMPCERT_EN=1",  # Enable certificate support
                 "ATCACERT_FULLSTOREDCERT_EN=0",
                 "ATCACERT_INTEGRATION_EN=0",
                 "ATCA_MAX_HAL_CACHE=1",
