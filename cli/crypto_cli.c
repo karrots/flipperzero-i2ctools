@@ -3,6 +3,7 @@
 #include "crypto_cli_formatter.h"
 #include "crypto_cli_registry.h"
 #include "commands/crypto_cmd_session.h"
+#include "../crypto/crypto_session_manager.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -42,6 +43,9 @@ static CryptoCommandResult help_command_execute(CryptoCommandContext* ctx) {
 }
 
 void crypto_cli_init(void) {
+    // Initialize session manager (creates I2C mutex for bus contention prevention)
+    crypto_session_manager_init();
+
     crypto_registry_init();
 
     // Register built-in commands
@@ -53,6 +57,9 @@ void crypto_cli_init(void) {
 
 void crypto_cli_cleanup(void) {
     crypto_registry_cleanup();
+
+    // Cleanup session manager (destroys I2C mutex)
+    crypto_session_manager_deinit();
 }
 
 // Parse command line into argc/argv

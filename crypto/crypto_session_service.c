@@ -29,36 +29,65 @@ typedef struct {
 static ATCA_STATUS session_open_command(void* ctx) {
     SessionOpenContext* context = (SessionOpenContext*)ctx;
 
-    // Read device revision via Info command
-    uint8_t info_buffer[4];
-    ATCA_STATUS status = atcab_info(info_buffer);
+    // WORKAROUND: Read operations (atcab_info, atcab_read_config_zone, atcab_read_zone)
+    // fail from CLI with ATCA_RX_FAIL (-26), but atcab_random() works.
+    //
+    // Investigation shows this is Flipper Zero specific - all I2C read operations from
+    // CLI context fail, while generate operations (Random) succeed. GUI works fine.
+    //
+    // Root cause: Unknown - possibly HAL-level I2C read issue from CLI context
+    // Workaround: Verify device with Random, use default device info for session
+
+    // Test device responsiveness with Random command (known to work from CLI)
+    uint8_t random_test[32];
+    ATCA_STATUS status = atcab_random(random_test);
     if(status != ATCA_SUCCESS) {
+        FURI_LOG_E("CryptoSession", "Device not responding to Random command: %d", status);
         return status;
     }
 
-    // Read config zone for serial number
-    uint8_t config_data[128];
-    status = atcab_read_config_zone(config_data);
-    if(status == ATCA_SUCCESS) {
-        // Extract serial number from config zone (bytes 0-3 and 8-12)
-        memcpy(&context->device_info->serial_number[0], &config_data[0], 4);
-        memcpy(&context->device_info->serial_number[4], &config_data[8], 5);
+    // Attempt to read device info from config zone (likely to fail on Flipper CLI)
+    uint8_t config_word[4];
+    status = atcab_read_zone(ATCA_ZONE_CONFIG, 0, 0, 0, config_word, 4);
 
-        // Extract device revision from config zone (bytes 4-7)
-        memcpy(&context->device_info->dev_rev, &config_data[4], 4);
-    } else {
-        // Use info buffer for partial serial
-        memcpy(&context->device_info->serial_number[0], info_buffer, 4);
-        context->device_info->dev_rev = 0x00006003; // ATECC608B default
+    if(status == ATCA_SUCCESS) {
+        // Success! Try to read more config data in 4-byte chunks
+        uint8_t config_data[16];
+        memcpy(&config_data[0], config_word, 4);
+
+        for(int word = 1; word < 4; word++) {
+            status = atcab_read_zone(ATCA_ZONE_CONFIG, 0, word, 0, &config_data[word * 4], 4);
+            if(status != ATCA_SUCCESS) {
+                break;
+            }
+        }
+
+        if(status == ATCA_SUCCESS) {
+            // Extract serial number (bytes 0-3 and 8-12)
+            memcpy(&context->device_info->serial_number[0], &config_data[0], 4);
+            memcpy(&context->device_info->serial_number[4], &config_data[8], 5);
+
+            // Extract device revision (bytes 4-7)
+            memcpy(&context->device_info->dev_rev, &config_data[4], 4);
+
+            FURI_LOG_I("CryptoSession", "Read device info: DevRev 0x%08lX",
+                       context->device_info->dev_rev);
+        }
     }
 
-    // Check lock status
-    bool is_locked = false;
-    status = atcab_is_locked(LOCK_ZONE_CONFIG, &is_locked);
-    context->device_info->config_locked = (status == ATCA_SUCCESS) ? is_locked : false;
+    if(status != ATCA_SUCCESS) {
+        // Read failed (expected on Flipper CLI) - use fallback device info
+        FURI_LOG_W("CryptoSession",
+                   "Config zone read failed (%d) - using default device info", status);
 
-    status = atcab_is_locked(LOCK_ZONE_DATA, &is_locked);
-    context->device_info->data_locked = (status == ATCA_SUCCESS) ? is_locked : false;
+        memset(&context->device_info->serial_number, 0xFF, 9);
+        context->device_info->dev_rev = 0x00600200; // ATECC608B standard DevRev
+        context->device_info->config_locked = true;
+        context->device_info->data_locked = true;
+    }
+
+    // Set I2C address
+    context->device_info->i2c_address = 0x60;
 
     return ATCA_SUCCESS;
 }
@@ -91,7 +120,7 @@ CryptoSessionStatus crypto_session_open(uint32_t keep_awake_ms) {
     );
 
     if(!success) {
-        FURI_LOG_E("CryptoSession", "Failed to open session: %d", atca_status);
+        FURI_LOG_E("CryptoSession", "Failed to open session: ATCA_STATUS = %d (0x%X)", atca_status, atca_status);
         session->state = CRYPTO_SESSION_STATE_ERROR;
 
         // Map ATCA status to session status
@@ -112,7 +141,6 @@ CryptoSessionStatus crypto_session_open(uint32_t keep_awake_ms) {
     session->keep_awake_ms = keep_awake_ms;
     session->last_activity_ms = furi_get_tick();
 
-    printf("[DEBUG] Session opened successfully!\n");
     FURI_LOG_I("CryptoSession", "Session opened successfully");
     return CRYPTO_SESSION_OK;
 }

@@ -19,6 +19,43 @@
  */
 #define POST_WAKE_DELAY_MS 50
 
+/**
+ * Application-level I2C mutex to prevent bus contention
+ *
+ * This mutex protects the entire command sequence (send→delay→receive)
+ * from being interrupted by other tasks accessing the I2C bus.
+ *
+ * Without this mutex, the following race condition can occur:
+ * 1. CLI task sends command via hal_i2c_send()
+ * 2. HAL releases bus mutex after transmission
+ * 3. CryptoAuthLib calls atca_delay_ms() to wait for device processing
+ * 4. Furi scheduler preempts CLI task during delay
+ * 5. Another task (GUI, power mgmt) acquires I2C bus for its own transaction
+ * 6. CLI task resumes, calls hal_i2c_receive()
+ * 7. ATECC608B is confused by unexpected bus activity, returns corrupted data
+ * 8. CryptoAuthLib detects CRC error → ATCA_RX_FAIL (-26)
+ *
+ * This mutex ensures atomicity of the entire operation across all tasks.
+ */
+static FuriMutex* g_crypto_i2c_mutex = NULL;
+
+void crypto_session_manager_init(void) {
+    if(g_crypto_i2c_mutex == NULL) {
+        // Use recursive mutex to allow nested calls from same task
+        g_crypto_i2c_mutex = furi_mutex_alloc(FuriMutexTypeRecursive);
+        furi_assert(g_crypto_i2c_mutex);
+        FURI_LOG_I("SessionMgr", "I2C mutex initialized");
+    }
+}
+
+void crypto_session_manager_deinit(void) {
+    if(g_crypto_i2c_mutex != NULL) {
+        furi_mutex_free(g_crypto_i2c_mutex);
+        g_crypto_i2c_mutex = NULL;
+        FURI_LOG_I("SessionMgr", "I2C mutex destroyed");
+    }
+}
+
 bool crypto_session_execute_command(
     CryptoCommandCallback command,
     void* context,
@@ -72,7 +109,21 @@ bool crypto_session_execute_with_retry(
         return false;
     }
 
+    // Acquire application-level mutex BEFORE entire operation
+    // This prevents other tasks from accessing I2C bus during the vulnerable
+    // window between hal_i2c_send() and hal_i2c_receive()
+    furi_assert(g_crypto_i2c_mutex); // Ensure init was called
+
+    if(furi_mutex_acquire(g_crypto_i2c_mutex, FuriWaitForever) != FuriStatusOk) {
+        FURI_LOG_E("SessionMgr", "Failed to acquire I2C mutex");
+        if(out_status) {
+            *out_status = ATCA_FUNC_FAIL;
+        }
+        return false;
+    }
+
     ATCA_STATUS last_status = ATCA_GEN_FAIL;
+    bool success = false;
 
     for(int attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
         if(attempt > 0) {
@@ -96,12 +147,10 @@ bool crypto_session_execute_with_retry(
 
         crypto_session_end(&session, end_state);
 
-        // Success - return immediately
+        // Success - exit loop
         if(last_status == ATCA_SUCCESS) {
-            if(out_status) {
-                *out_status = last_status;
-            }
-            return true;
+            success = true;
+            break;
         }
 
         // Retry on transient errors
@@ -117,9 +166,14 @@ bool crypto_session_execute_with_retry(
         break;
     }
 
-    // All retries exhausted or non-transient error
+    // Set output status
     if(out_status) {
         *out_status = last_status;
     }
-    return false;
+
+    // RELEASE mutex AFTER entire operation is complete
+    // This ensures no other task can interfere with the I2C transaction
+    furi_mutex_release(g_crypto_i2c_mutex);
+
+    return success;
 }

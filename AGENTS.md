@@ -78,17 +78,17 @@ typedef struct {
 
 ### Key Source Files
 
-| File | Purpose |
-|------|---------|
-| [i2ctools.c](i2ctools.c) | Main entry point, event loop, view dispatcher |
-| [i2ctools_i.h](i2ctools_i.h) | Internal header with `i2cTools` state struct |
-| [i2cscanner.c](i2cscanner.c) | I2C address scanning logic |
-| [i2csniffer.c](i2csniffer.c) | I2C traffic capture and analysis |
-| [i2csender.c](i2csender.c) | Custom I2C command sending |
-| [views/crypto_view.c](views/crypto_view.c) | ATECC608B UI and actions |
-| [crypto/crypto_service.c](crypto/crypto_service.c) | CryptoAuthLib session management |
-| [crypto/hal_furi_i2c.c](crypto/hal_furi_i2c.c) | Custom HAL bridging CryptoAuthLib to FlipperZero I2C |
-| [crypto/atca_config.h](crypto/atca_config.h) | CryptoAuthLib feature flags and timing configuration |
+| File                                               | Purpose                                              |
+| -------------------------------------------------- | ---------------------------------------------------- |
+| [i2ctools.c](i2ctools.c)                           | Main entry point, event loop, view dispatcher        |
+| [i2ctools_i.h](i2ctools_i.h)                       | Internal header with `i2cTools` state struct         |
+| [i2cscanner.c](i2cscanner.c)                       | I2C address scanning logic                           |
+| [i2csniffer.c](i2csniffer.c)                       | I2C traffic capture and analysis                     |
+| [i2csender.c](i2csender.c)                         | Custom I2C command sending                           |
+| [views/crypto_view.c](views/crypto_view.c)         | ATECC608B UI and actions                             |
+| [crypto/crypto_service.c](crypto/crypto_service.c) | CryptoAuthLib session management                     |
+| [crypto/hal_furi_i2c.c](crypto/hal_furi_i2c.c)     | Custom HAL bridging CryptoAuthLib to FlipperZero I2C |
+| [crypto/atca_config.h](crypto/atca_config.h)       | CryptoAuthLib feature flags and timing configuration |
 
 ## CryptoAuthLib Integration
 
@@ -220,3 +220,5 @@ Current development:
 5. **Stack Size**: Limited to 2KB. Be cautious with large stack allocations and deep recursion.
 
 6. **I2C Bus Conflicts**: Always release I2C bus properly in cleanup paths. Sniffer view must restore bus state when exiting.
+
+7. **Preemption race conditions**: I2C read operations on Flipper Zero can fail from the CLI while working from the GUI due to a task preemption race condition in the RTOS. This happens when another task interrupts a multi-step I2C command (send, wait, read), causing the ATECC device to desynchronize and return a CRC error (`ATCA_RX_FAIL`). The correct solution is to wrap the entire command sequence in an application-level mutex, making the logical operation atomic. For more details read [docs/I2C_RTOS_Preemption.md](docs/I2C_RTOS_Preemption.md)

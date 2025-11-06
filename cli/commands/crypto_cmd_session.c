@@ -56,7 +56,7 @@ static CryptoCommandResult session_cmd_open(CryptoCommandContext* ctx) {
                 exit_code = CRYPTO_EXIT_DEVICE_NOT_FOUND;
                 break;
             case CRYPTO_SESSION_ERR_COMMS_ERROR:
-                error_msg = "I2C communication error";
+                error_msg = "I2C communication error\nHint: Check I2C bus and connections";
                 exit_code = CRYPTO_EXIT_COMMS_ERROR;
                 break;
             case CRYPTO_SESSION_ERR_ALREADY_OPEN:

@@ -72,3 +72,21 @@ bool crypto_session_execute_with_retry(
     void* context,
     CryptoDevicePowerState end_state,
     ATCA_STATUS* out_status);
+
+/**
+ * Initialize session manager (creates I2C mutex)
+ *
+ * Must be called once during application startup before any
+ * crypto operations are performed.
+ *
+ * The mutex prevents I2C bus contention when commands are
+ * split across multiple transactions (send→delay→receive).
+ */
+void crypto_session_manager_init(void);
+
+/**
+ * Deinitialize session manager (destroys I2C mutex)
+ *
+ * Should be called during application shutdown.
+ */
+void crypto_session_manager_deinit(void);
