@@ -3,6 +3,7 @@
 #include "crypto_cli_formatter.h"
 #include "crypto_cli_registry.h"
 #include "commands/crypto_cmd_session.h"
+#include "commands/crypto_cmd_mac.h"
 #include "../crypto/crypto_session_manager.h"
 #include <stdio.h>
 #include <string.h>
@@ -53,6 +54,9 @@ void crypto_cli_init(void) {
 
     // Register session management command
     crypto_cmd_session_register();
+
+    // Register MAC/HMAC command
+    crypto_cmd_mac_register();
 }
 
 void crypto_cli_cleanup(void) {
